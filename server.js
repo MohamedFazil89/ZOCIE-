@@ -55,6 +55,11 @@ app.post("/salesiq-shopify", async (req, res) => {
       replies: [replyText],
       // status: orders_status
     });
+    console.log( res.json({
+      action: "reply",
+      replies: [replyText],
+      // status: orders_status
+    }))
   } catch (e) {
     console.error(e);
     res.json({

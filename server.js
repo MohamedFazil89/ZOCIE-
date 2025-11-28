@@ -49,26 +49,17 @@ app.post("/salesiq-shopify", async (req, res) => {
       ? `Orders for ${customerEmail}:\n` + orders.join("\n")
       : `No orders found for ${customerEmail}.`;
 
-      console.log({
+    console.log({
       action: "reply",
       replies: [replyText],
       // status: orders_status
     })
     // Response for SalesIQ
-   res.json([
-  {
-    action: {
-      value: "reply",
-      meta: { type: "string", value: "reply" }
-    },
-    orders_text: {
-      value: replyText,
-      meta: { type: "string", value: replyText }
-    }
-  }
-]);
+    res.json({
+      orders_text: replyText
+    });
 
-    
+
   } catch (e) {
     console.error(e);
     res.json({

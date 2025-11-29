@@ -719,7 +719,6 @@ app.post("/salesiq-return-order", async (req, res) => {
     });
   }
 });
-
 // =====================================================
 // HEALTH CHECK
 // =====================================================
@@ -727,6 +726,25 @@ app.get("/health", (req, res) => {
   res.json({ 
     status: "ok", 
     store: SHOPIFY_STORE,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 🔴 ADD THIS NEW ROUTE HERE:
+app.get("/api/shopify/config-check", (req, res) => {
+  res.json({
+    configured: {
+      SHOPIFY_API_KEY: !!SHOPIFY_API_KEY,
+      SHOPIFY_API_SECRET: !!SHOPIFY_API_SECRET,
+      SHOPIFY_STORE: !!SHOPIFY_STORE,
+      ADMIN_TOKEN: !!ADMIN_TOKEN,
+      BASE_URL: !!BASE_URL
+    },
+    values: {
+      SHOPIFY_API_KEY: SHOPIFY_API_KEY ? `${SHOPIFY_API_KEY.substring(0, 10)}...` : 'NOT SET',
+      BASE_URL: BASE_URL,
+      SHOPIFY_STORE: SHOPIFY_STORE
+    },
     timestamp: new Date().toISOString()
   });
 });

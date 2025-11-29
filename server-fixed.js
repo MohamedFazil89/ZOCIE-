@@ -2,33 +2,20 @@
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+
 const app = express();
 app.use(express.json());
-
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
 dotenv.config();
-// Storage for OAuth states
-const oauthStates = new Map();
-
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || "fractix.myshopify.com";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN_KEY;
 const API_VERSION = "2024-10";
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
-const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEYS;
 
+// =====================================================
+// HELPER: SHOPIFY REQUEST FUNCTION (SINGLE DEFINITION)
+// =====================================================
 
-// Helper function to make Shopify API calls
-async function shopifyOAuthRequest(endpoint, method = "GET", body = null) {
+async function shopifyRequest(endpoint, method = "GET", body = null) {
   const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}${endpoint}`;
   const options = {
     method,
@@ -42,88 +29,105 @@ async function shopifyOAuthRequest(endpoint, method = "GET", body = null) {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(url, options);
-  return await response.json();
+  try {
+    const response = await fetch(url, options);
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error(`Shopify API Error on ${endpoint}:`, error);
+    throw error;
+  }
 }
+
+// =====================================================
+// 1. DEALS OF THE DAY - GET TOP 3 PRODUCTS
+// =====================================================
 
 app.post("/salesiq-deals", async (req, res) => {
   try {
-    const data = await shopifyOAuthRequest("/products.json?limit=10&sort=created_at:desc");
+    const data = await shopifyRequest("/products.json?limit=10&sort=created_at:desc");
     const products = data.products || [];
 
     if (products.length === 0) {
       return res.json({
-        cards: [],
-        message: "No deals available right now."
+        action: "reply",
+        replies: ["No deals available right now."]
       });
     }
 
-    const cards = products.slice(0, 10).map(p => {
+    // Take top 3 products
+    const topProducts = products.slice(0, 3);
+
+    // Build elements array for official SalesIQ format
+    const elements = topProducts.map(p => {
       const v = p.variants?.[0];
       const price = v?.price || "N/A";
       const compare = v?.compare_at_price;
       const img = p.images?.[0]?.src || "";
       const productUrl = `https://${SHOPIFY_STORE}/products/${p.handle}`;
 
-      let subtitle = `$${price}`;
+      let subtitle = `$${price} USD`;
       if (compare && parseFloat(compare) > parseFloat(price)) {
         const discount = Math.round(((compare - price) / compare) * 100);
-        subtitle = `🔥 $${price} (Save ${discount}%)`;
+        subtitle = `🔥 $${price} USD (Save ${discount}%)`;
       }
-
-      const buttons = [
-        {
-          label: "View More",
-          type: "url",
-          value: productUrl
-        },
-        {
-          label: "Buy Now",
-          type: "text",
-          value: {
-            variant_id: v?.id || "",
-            price: price
-          }
-        },
-        {
-          label: "Add to Cart",
-          type: "text",
-          value: {
-            variant_id: v?.id || "",
-            price: price
-          }
-        }
-      ];
 
       return {
         title: p.title,
         subtitle: subtitle,
+        id: p.id.toString(),
         image: img,
-        buttons: buttons
+        actions: [
+          {
+            label: "Add to Cart",
+            name: "add_to_cart_btn",
+            type: "client_action",
+            clientaction_name: "addToCart"
+          },
+          {
+            label: "Buy Now",
+            name: "buy_now_btn",
+            type: "url",
+            link: productUrl
+          },
+          {
+            label: "View Details",
+            name: "view_details_btn",
+            type: "url",
+            link: productUrl
+          }
+        ]
       };
     });
 
+    // Official SalesIQ 2025 format
     return res.json({
-      cards: cards,
-      message: "Deals fetched successfully"
+      action: "reply",
+      replies: [
+        {
+          type: "multiple-product",
+          text: "✨ Here are our top 3 deals!",
+          elements: elements
+        }
+      ]
     });
 
   } catch (err) {
-    console.error("Error:", err);
+    console.error("Error in /salesiq-deals:", err);
     return res.json({
-      cards: [],
-      message: "Failed to load deals."
+      action: "reply",
+      replies: ["Error loading deals. Please try again."]
     });
   }
 });
 
 // =====================================================
-// 2. TRACK ORDER - Get Latest Order Status by Email
+// 2. TRACK ORDER - GET LATEST ORDER STATUS BY EMAIL
 // =====================================================
+
 app.post("/salesiq-track-order", async (req, res) => {
   try {
-    const payload = req.body;
-    const email = payload.session?.email?.value || payload.email;
+    const email = req.body.email || req.query.email;
 
     if (!email) {
       return res.json({
@@ -132,8 +136,7 @@ app.post("/salesiq-track-order", async (req, res) => {
       });
     }
 
-    // Fetch orders for this email, sorted by created_at descending (latest first)
-    const data = await shopifyOAuthRequest(
+    const data = await shopifyRequest(
       `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=5`
     );
 
@@ -144,10 +147,8 @@ app.post("/salesiq-track-order", async (req, res) => {
       });
     }
 
-    // Get the latest order
     const latestOrder = data.orders[0];
     
-    // Build detailed order status
     const orderInfo = {
       orderNumber: latestOrder.name,
       createdAt: new Date(latestOrder.created_at).toLocaleDateString(),
@@ -161,7 +162,6 @@ app.post("/salesiq-track-order", async (req, res) => {
       trackingUrl: latestOrder.fulfillments?.[0]?.tracking_url || null
     };
 
-    // Generate status message
     let statusMessage = `📦 **Order ${orderInfo.orderNumber}**\n\n`;
     statusMessage += `📅 Placed: ${orderInfo.createdAt}\n`;
     statusMessage += `💰 Total: ${orderInfo.totalPrice}\n`;
@@ -173,63 +173,47 @@ app.post("/salesiq-track-order", async (req, res) => {
       statusMessage += `🔍 Tracking: ${orderInfo.trackingNumber}\n`;
     }
 
-    // Add action buttons based on status
-    const buttons = [];
+    const suggestions = [];
     
     if (orderInfo.trackingUrl) {
-      buttons.push({
-        label: "Track Shipment",
-        type: "url",
-        value: orderInfo.trackingUrl
-      });
+      suggestions.push("Track Shipment");
     }
 
-    // Allow return if order is fulfilled and not cancelled
     if (latestOrder.fulfillment_status === "fulfilled" && !latestOrder.cancelled_at) {
-      buttons.push({
-        label: "Return Order",
-        type: "invoke.function",
-        value: {
-          function_name: "returnOrder",
-          order_id: latestOrder.id,
-          order_number: latestOrder.name
-        }
-      });
+      suggestions.push("Return Order");
     }
+
+    suggestions.push("🛍️ Browse Deals");
 
     res.json({
       action: "reply",
       replies: [statusMessage],
-      buttons: buttons.length > 0 ? buttons : undefined
+      suggestions: suggestions
     });
 
   } catch (err) {
-    console.error("Error tracking order:", err);
+    console.error("Error in /salesiq-track-order:", err);
     res.json({
       action: "reply",
       replies: ["Error fetching your order details. Please try again."]
     });
   }
 });
+
 // =====================================================
-// BACKEND - ADD TO CART ROUTE
-// Creates/Updates Shopify Draft Orders
+// 3. ADD TO CART - CREATE/UPDATE DRAFT ORDERS
 // =====================================================
 
 app.post("/salesiq-add-to-cart", async (req, res) => {
   try {
-    
-    // Get data from Zobot
     const variantId = req.body.variant_id || req.query.variant_id;
     const quantity = req.body.quantity || req.query.quantity || 1;
     
-    // Get email from session or body
     let email = req.body.email || req.query.email;
     if (!email && req.session) {
       email = req.session.email?.value || req.session.email;
     }
     
-    // Validate inputs
     if (!variantId) {
       return res.json({
         action: "reply",
@@ -237,15 +221,13 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
       });
     }
     
-    // Fallback email if not provided
     if (!email) {
       email = `guest-${Date.now()}@fractix.local`;
     }
     
     console.log(`Adding to cart - Variant: ${variantId}, Qty: ${quantity}, Email: ${email}`);
     
-    // Fetch existing draft orders
-    const draftsData = await shopifyOAuthRequest(
+    const draftsData = await shopifyRequest(
       `/draft_orders.json?status=open&limit=50`
     );
     
@@ -253,20 +235,14 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
     
     if (draftsData.draft_orders && draftsData.draft_orders.length > 0) {
       
-      // Find draft order for this customer or use first one
       let existingDraft = draftsData.draft_orders[0];
-      
-      // Update existing draft order - add line item
       const lineItems = existingDraft.line_items || [];
       
-      // Check if variant already in cart
       const existingItem = lineItems.find(item => item.variant_id == variantId);
       
       if (existingItem) {
-        // Update quantity
         existingItem.quantity += parseInt(quantity);
       } else {
-        // Add new item
         lineItems.push({
           variant_id: parseInt(variantId),
           quantity: parseInt(quantity)
@@ -279,7 +255,7 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
         }
       };
       
-      const updated = await shopifyOAuthRequest(
+      const updated = await shopifyRequest(
         `/draft_orders/${existingDraft.id}.json`,
         "PUT",
         updateBody
@@ -289,7 +265,6 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
       
     } else {
       
-      // Create new draft order
       const createBody = {
         draft_order: {
           email: email,
@@ -303,7 +278,7 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
         }
       };
       
-      const created = await shopifyOAuthRequest(
+      const created = await shopifyRequest(
         "/draft_orders.json",
         "POST",
         createBody
@@ -312,14 +287,9 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
       draftOrder = created.draft_order;
     }
     
-    // Calculate totals
     const itemCount = draftOrder.line_items.reduce((sum, item) => sum + item.quantity, 0);
     const totalPrice = draftOrder.total_price || "0.00";
     
-    // Get checkout URL
-    const invoiceUrl = draftOrder.invoice_url || "#";
-    
-    // Return success response
     return res.json({
       action: "reply",
       replies: [
@@ -333,7 +303,7 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
     });
     
   } catch (err) {
-    console.error("Error adding to cart:", err);
+    console.error("Error in /salesiq-add-to-cart:", err);
     
     return res.json({
       action: "reply",
@@ -348,16 +318,15 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
   }
 });
 
+// =====================================================
+// 4. BUY NOW - CREATE ORDER INSTANTLY
+// =====================================================
 
-// =====================================================
-// 4. BUY NOW - Create Order Instantly
-// =====================================================
 app.post("/salesiq-buy-now", async (req, res) => {
   try {
-    const payload = req.body;
-    const email = payload.session?.email?.value || payload.email;
-    const variantId = payload.variant_id;
-    const quantity = payload.quantity || 1;
+    const email = req.body.email;
+    const variantId = req.body.variant_id;
+    const quantity = req.body.quantity || 1;
 
     if (!email) {
       return res.json({
@@ -373,7 +342,6 @@ app.post("/salesiq-buy-now", async (req, res) => {
       });
     }
 
-    // Create draft order
     const createBody = {
       draft_order: {
         email: email,
@@ -388,7 +356,7 @@ app.post("/salesiq-buy-now", async (req, res) => {
       }
     };
 
-    const created = await shopifyOAuthRequest(
+    const created = await shopifyRequest(
       "/draft_orders.json",
       "POST",
       createBody
@@ -396,23 +364,19 @@ app.post("/salesiq-buy-now", async (req, res) => {
 
     const draftOrder = created.draft_order;
 
-    // Send invoice URL for payment
     res.json({
       action: "reply",
       replies: [
         `🎉 Your order is ready!\n\n💰 Total: $${draftOrder.total_price} USD\n\nClick below to complete payment securely.`
       ],
-      buttons: [
-        {
-          label: "Complete Payment",
-          type: "url",
-          value: draftOrder.invoice_url
-        }
+      suggestions: [
+        "Complete Payment",
+        "🛍️ Browse More"
       ]
     });
 
   } catch (err) {
-    console.error("Error creating buy now order:", err);
+    console.error("Error in /salesiq-buy-now:", err);
     res.json({
       action: "reply",
       replies: ["Couldn't process your order. Please try again."]
@@ -421,14 +385,14 @@ app.post("/salesiq-buy-now", async (req, res) => {
 });
 
 // =====================================================
-// 5. RETURN ORDER - Initiate Refund Process
+// 5. RETURN ORDER - INITIATE REFUND PROCESS
 // =====================================================
+
 app.post("/salesiq-return-order", async (req, res) => {
   try {
-    const payload = req.body;
-    const orderId = payload.order_id;
-    const orderNumber = payload.order_number;
-    const reason = payload.reason || "Customer request";
+    const orderId = req.body.order_id;
+    const orderNumber = req.body.order_number;
+    const reason = req.body.reason || "Customer request";
 
     if (!orderId) {
       return res.json({
@@ -437,8 +401,7 @@ app.post("/salesiq-return-order", async (req, res) => {
       });
     }
 
-    // Get order details
-    const orderData = await shopifyOAuthRequest(`/orders/${orderId}.json`);
+    const orderData = await shopifyRequest(`/orders/${orderId}.json`);
     const order = orderData.order;
 
     if (!order) {
@@ -448,7 +411,6 @@ app.post("/salesiq-return-order", async (req, res) => {
       });
     }
 
-    // Check if order can be returned
     if (order.cancelled_at) {
       return res.json({
         action: "reply",
@@ -463,7 +425,6 @@ app.post("/salesiq-return-order", async (req, res) => {
       });
     }
 
-    // Calculate refund amount (for demo, we'll create a full refund)
     const calculateBody = {
       refund: {
         shipping: {
@@ -477,7 +438,7 @@ app.post("/salesiq-return-order", async (req, res) => {
       }
     };
 
-    const calculated = await shopifyOAuthRequest(
+    const calculated = await shopifyRequest(
       `/orders/${orderId}/refunds/calculate.json`,
       "POST",
       calculateBody
@@ -488,8 +449,6 @@ app.post("/salesiq-return-order", async (req, res) => {
       0
     ) || 0;
 
-    // For hackathon demo, we'll just show the return form
-    // In production, you'd actually process the refund here
     res.json({
       action: "reply",
       replies: [
@@ -499,42 +458,14 @@ app.post("/salesiq-return-order", async (req, res) => {
         `📧 You'll receive a confirmation email shortly.\n\n` +
         `Need help? Contact our support team.`
       ],
-      buttons: [
-        {
-          label: "Track Return Status",
-          type: "url",
-          value: `https://${SHOPIFY_STORE}/account/orders/${order.token}`
-        }
+      suggestions: [
+        "Track Return Status",
+        "🛍️ Browse Deals"
       ]
     });
 
-    // Optionally: Actually create the refund (commented for safety)
-    /*
-    const refundBody = {
-      refund: {
-        ...calculateBody.refund,
-        notify: true,
-        note: reason,
-        transactions: [
-          {
-            parent_id: order.transactions?.[0]?.id,
-            amount: refundAmount.toFixed(2),
-            kind: "refund",
-            gateway: order.transactions?.[0]?.gateway
-          }
-        ]
-      }
-    };
-
-    await shopifyOAuthRequest(
-      `/orders/${orderId}/refunds.json`,
-      "POST",
-      refundBody
-    );
-    */
-
   } catch (err) {
-    console.error("Error processing return:", err);
+    console.error("Error in /salesiq-return-order:", err);
     res.json({
       action: "reply",
       replies: ["Couldn't process your return request. Please contact support."]
@@ -545,6 +476,7 @@ app.post("/salesiq-return-order", async (req, res) => {
 // =====================================================
 // HEALTH CHECK
 // =====================================================
+
 app.get("/health", (req, res) => {
   res.json({ 
     status: "ok", 
@@ -556,6 +488,7 @@ app.get("/health", (req, res) => {
 // =====================================================
 // ERROR HANDLER
 // =====================================================
+
 app.use((err, req, res, next) => {
   console.error("Server error:", err);
   res.status(500).json({
@@ -564,162 +497,19 @@ app.use((err, req, res, next) => {
   });
 });
 
-
-
 // =====================================================
-// SHOPIFY OAUTH FLOW
+// START SERVER
 // =====================================================
-
-// Step 1: Initiate OAuth
-// REPLACE YOUR ENTIRE OAUTH SECTION (around line 500-700) WITH THIS:
-
-// =====================================================
-// OAUTH ROUTES - FOR ONBOARDING
-// =====================================================
-
-// Step 1: Generate OAuth URL
-app.get("/api/shopify/auth/start", (req, res) => {
-  const shop = req.query.shop;
-  
-  if (!shop) {
-    return res.status(400).json({ error: "Shop parameter required" });
-  }
-
-  // Generate random state for security (NO CRYPTO NEEDED)
-  const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-  
-  // Store state temporarily (expires in 10 minutes)
-  oauthStates.set(state, { shop, timestamp: Date.now() });
-  
-  // Build OAuth URL
-  const redirectUri = `${BASE_URL}/api/shopify/auth/callback`;
-  const authUrl = `https://${shop}/admin/oauth/authorize?` +
-    `client_id=${SHOPIFY_API_KEY}&` +
-    `scope=write_products,read_orders,write_orders,read_draft_orders,write_draft_orders&` +
-    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-    `state=${state}`;
-
-  res.json({ authUrl, state });
-});
-
-// Step 2: OAuth Callback
-app.get("/api/shopify/auth/callback", async (req, res) => {
-  try {
-    const { code, shop, state } = req.query;
-
-    // Verify state
-    if (!oauthStates.has(state)) {
-      return res.status(403).send("Invalid state parameter");
-    }
-
-    const stateData = oauthStates.get(state);
-    
-    // Check if state expired (10 minutes)
-    if (Date.now() - stateData.timestamp > 600000) {
-      oauthStates.delete(state);
-      return res.status(403).send("State expired");
-    }
-
-    oauthStates.delete(state);
-
-    // Exchange code for access token
-    const tokenUrl = `https://${shop}/admin/oauth/access_token`;
-    const tokenResponse = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_id: SHOPIFY_API_KEY,
-        client_secret: SHOPIFY_API_SECRET,
-        code
-      })
-    });
-
-    const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token;
-
-    if (!accessToken) {
-      throw new Error("Failed to get access token");
-    }
-
-    // Success! Redirect to success page
-    res.redirect(`/success.html?shop=${shop}&accessToken=${accessToken}`);
-
-  } catch (error) {
-    console.error('OAuth callback error:', error);
-    res.status(500).send('OAuth failed: ' + error.message);
-  }
-});
-
-// =====================================================
-// HELPER FUNCTIONS
-// =====================================================
-
-// async function shopifyOAuthRequest(shop, accessToken, endpoint, method = "GET", body = null) {
-//   const url = `https://${shop}/admin/api/${API_VERSION}${endpoint}`;
-//   const options = {
-//     method,
-//     headers: {
-//       "X-Shopify-Access-Token": accessToken,
-//       "Content-Type": "application/json"
-//     }
-//   };
-  
-//   if (body) {
-//     options.body = JSON.stringify(body);
-//   }
-
-//   const response = await fetch(url, options);
-//   return await response.json();
-// }
-
-function encrypt(text) {
-  // Simple encryption - use proper encryption in production (AES-256)
-  return Buffer.from(text).toString('base64');
-}
-
-function decrypt(encrypted) {
-  return Buffer.from(encrypted, 'base64').toString('utf-8');
-}
-
-function generateFeatures(products) {
-  const features = [
-    { name: "Deals of the Day", enabled: true, generated: true },
-    { name: "Order Tracking", enabled: true, generated: true },
-    { name: "Add to Cart", enabled: true, generated: true },
-    { name: "Buy Now Checkout", enabled: true, generated: true },
-    { name: "Return Order", enabled: true, generated: true },
-    { name: "Customer Memory", enabled: true, generated: true }
-  ];
-
-  const hasVariants = products.some(p => p.variants && p.variants.length > 1);
-  if (hasVariants) {
-    features.push({ name: "Size/Color Selector", enabled: true, generated: true });
-  }
-
-  const hasImages = products.some(p => p.images && p.images.length > 0);
-  if (hasImages) {
-    features.push({ name: "Visual Product Browser", enabled: true, generated: true });
-  }
-
-  return features;
-}
-
-function generateBotScript(businessId, shop) {
-  return `// =====================================================
-// AUTO-GENERATED ZOBOT for ${shop}
-// Business ID: ${businessId}
-// Generated: ${new Date().toISOString()}
-// =====================================================
-
-BACKEND_URL = "${BASE_URL}";
-BUSINESS_ID = "${businessId}"`;
-}
-
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Shopify SalesIQ Backend running on port ${PORT}`);
   console.log(`📍 Store: ${SHOPIFY_STORE}`);
   console.log(`✅ Health check: http://localhost:${PORT}/health`);
+  console.log(`✅ Routes available:`);
+  console.log(`   POST /salesiq-deals`);
+  console.log(`   POST /salesiq-track-order`);
+  console.log(`   POST /salesiq-add-to-cart`);
+  console.log(`   POST /salesiq-buy-now`);
+  console.log(`   POST /salesiq-return-order`);
 });

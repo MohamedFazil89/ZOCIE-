@@ -28,7 +28,6 @@ async function shopifyRequest(endpoint, method = "GET", body = null) {
   const response = await fetch(url, options);
   return await response.json();
 }
-
 app.post("/salesiq-deals", async (req, res) => {
   try {
     const data = await shopifyRequest("/products.json?limit=10&sort=created_at:desc");
@@ -36,65 +35,69 @@ app.post("/salesiq-deals", async (req, res) => {
 
     if (products.length === 0) {
       return res.json({
-        platform: "ZOHOSALESIQ",
-        action: "reply",
-        replies: [
-          { text: "No deals available right now!" }
-        ]
+        cards: [],
+        message: "No deals available right now."
       });
     }
 
-    const elements = products.slice(0, 10).map(p => {
+    const cards = products.slice(0, 10).map(p => {
       const v = p.variants?.[0];
       const price = v?.price || "N/A";
       const compare = v?.compare_at_price;
       const img = p.images?.[0]?.src || "";
-      const url = `https://${SHOPIFY_STORE}/products/${p.handle}`;
+      const productUrl = `https://${SHOPIFY_STORE}/products/${p.handle}`;
 
-      let subtitle = `$${price} USD`;
+      let subtitle = `$${price}`;
       if (compare && parseFloat(compare) > parseFloat(price)) {
         const discount = Math.round(((compare - price) / compare) * 100);
         subtitle = `🔥 $${price} (Save ${discount}%)`;
       }
 
+      const buttons = [
+        {
+          label: "View More",
+          type: "url",
+          value: productUrl
+        },
+        {
+          label: "Buy Now",
+          type: "text",
+          value: {
+            variant_id: v?.id || "",
+            price: price
+          }
+        },
+        {
+          label: "Add to Cart",
+          type: "text",
+          value: {
+            variant_id: v?.id || "",
+            price: price
+          }
+        }
+      ];
+
       return {
-        id: p.id.toString(),
         title: p.title,
         subtitle: subtitle,
         image: img,
-        actions: [
-          {
-            label: "View More",
-            name: "view_" + p.id,
-            type: "url",
-            link: url
-          }
-        ]
+        buttons: buttons
       };
     });
 
     return res.json({
-      platform: "ZOHOSALESIQ",
-      action: "reply",
-      replies: [
-        {
-          type: "carousel",
-          text: "Here are today's deals",
-          elements: elements
-        }
-      ]
+      cards: cards,
+      message: "Deals fetched successfully"
     });
 
   } catch (err) {
     console.error("Error:", err);
     return res.json({
-      platform: "ZOHOSALESIQ",
-      action: "reply",
-      replies: [{ text: "Failed to load deals. Try later." }]
+      cards: [],
+      message: "Failed to load deals."
     });
   }
 });
-
 
 // =====================================================
 // 2. TRACK ORDER - Get Latest Order Status by Email

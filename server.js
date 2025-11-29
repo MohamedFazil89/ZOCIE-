@@ -2,7 +2,6 @@
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
-
 const app = express();
 app.use(express.json());
 dotenv.config();
@@ -96,7 +95,7 @@ app.post("/salesiq-deals", async (req, res) => {
 
     res.json({
       action: "show",
-      type: "cards",
+      type: "carousel",
       cards: cards
     });
 
@@ -530,6 +529,8 @@ app.use((err, req, res, next) => {
     replies: ["An unexpected error occurred. Please try again."]
   });
 });
+
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

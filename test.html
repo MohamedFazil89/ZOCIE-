@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SuperMemory API Tester</title>
+</head>
+<body>
+    <h2>SuperMemory API Test UI</h2>
+
+    <h3>Store Memory</h3>
+    <input id="userId" placeholder="User ID" /> <br><br>
+    <textarea id="message" placeholder="Message"></textarea><br><br>
+    <input id="context" placeholder="Context (optional)" /><br><br>
+    <button onclick="storeMemory()">Store Memory</button>
+
+    <h3>Recall Memories</h3>
+    <input id="recallUserId" placeholder="User ID to recall" /> <br><br>
+    <button onclick="recallMemory()">Recall</button>
+
+    <h3>Response</h3>
+    <pre id="responseBox" style="background:#f1f1f1; padding:10px;"></pre>
+
+<script>
+async function storeMemory() {
+    const body = {
+        userId: document.getElementById("userId").value,
+        message: document.getElementById("message").value,
+        context: document.getElementById("context").value
+    };
+
+   const res = await fetch(`http://localhost:3000/api/memory/recall/${userId}`);
+
+    
+    document.getElementById("responseBox").textContent =
+        JSON.stringify(await res.json(), null, 2);
+}
+
+async function recallMemory() {
+    const userId = document.getElementById("recallUserId").value;
+    const res = await fetch(`/api/memory/recall/${userId}`);
+
+    document.getElementById("responseBox").textContent =
+        JSON.stringify(await res.json(), null, 2);
+}
+</script>
+
+</body>
+</html>

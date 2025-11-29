@@ -56,7 +56,7 @@ app.post("/salesiq-shopify", async (req, res) => {
     })
     // Response for SalesIQ
     res.json({
-      orders_text: replyText
+      orderstext: replyText
     });
 
 

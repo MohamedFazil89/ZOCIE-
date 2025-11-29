@@ -29,84 +29,82 @@ async function shopifyRequest(endpoint, method = "GET", body = null) {
   return await response.json();
 }
 
-// =====================================================
-// 1. DEALS OF THE DAY - Get Featured/Discounted Products
-// =====================================================
 app.post("/salesiq-deals", async (req, res) => {
   try {
-    // Fetch products with price sorting or by collection
-    // For demo: Get first 10 products sorted by created_at (newest deals)
     const data = await shopifyRequest("/products.json?limit=10&sort=created_at:desc");
-
-    if (!data.products || data.products.length === 0) {
+    const prods = data.products || [];
+    if (prods.length === 0) {
       return res.json({
         action: "reply",
         replies: ["No deals available at the moment. Check back soon! 🎉"]
       });
     }
 
-    // Build SalesIQ card carousel
-    const cards = data.products.map(p => {
-      const variant = p.variants?.[0];
-      const price = variant?.price || "N/A";
-      const comparePrice = variant?.compare_at_price;
-      const image = p.images?.[0]?.src || "";
+    // take top 3 (or fewer if less available)
+    const top = prods.slice(0, 3);
+
+    const elements = top.map(p => {
+      const var0 = p.variants && p.variants[0];
+      const price = var0?.price || "N/A";
+      const compare = var0?.compare_at_price;
+      const img = p.images && p.images[0]?.src || "";
       const productUrl = `https://${SHOPIFY_STORE}/products/${p.handle}`;
-      
-      // Calculate discount if available
+
       let subtitle = `$${price} USD`;
-      if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
-        const discount = Math.round(((comparePrice - price) / comparePrice) * 100);
-        subtitle = `🔥 $${price} USD (Save ${discount}%)`;
+      if (compare && parseFloat(compare) > parseFloat(price)) {
+        const disc = Math.round(((parseFloat(compare) - parseFloat(price)) / parseFloat(compare)) * 100);
+        subtitle = `🔥 $${price} USD (Save ${disc}%)`;
       }
 
       return {
+        id: p.id.toString(),              // mandatory
         title: p.title,
         subtitle: subtitle,
-        image: image,
-        buttons: [
+        image: img,
+        actions: [
           {
             label: "Add to Cart",
-            type: "invoke.function",
-            value: {
-              function_name: "addToCart",
-              product_id: p.id,
-              variant_id: variant?.id
-            }
+            name: "add_to_cart_btn_" + p.id,        // unique button name
+            type: "client_action",                   // or "url" depending on support
+            clientaction_name: "addToCart",          // must match your client action handler
+            // you can optionally pass metadata via other fields if required
           },
           {
             label: "Buy Now",
-            type: "invoke.function", 
-            value: {
-              function_name: "buyNow",
-              product_id: p.id,
-              variant_id: variant?.id,
-              price: price
-            }
+            name: "buy_now_btn_" + p.id,
+            type: "client_action",
+            clientaction_name: "buyNow",
           },
           {
             label: "View Details",
+            name: "view_details_" + p.id,
             type: "url",
-            value: productUrl
+            link: productUrl
           }
         ]
       };
     });
 
-    res.json({
-      action: "show",
-      type: "carousel",
-      cards: cards
+    const replyCard = {
+      type: "multiple-product",
+      text: "✨ Here are our top 3 deals!",
+      elements: elements
+    };
+
+    return res.json({
+      action: "reply",
+      replies: [ replyCard ]
     });
 
   } catch (err) {
     console.error("Error fetching deals:", err);
-    res.json({
+    return res.json({
       action: "reply",
       replies: ["Sorry, couldn't load deals right now. Please try again! 😔"]
     });
   }
 });
+
 
 // =====================================================
 // 2. TRACK ORDER - Get Latest Order Status by Email

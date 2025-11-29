@@ -61,10 +61,6 @@ app.post("/salesiq-shopify", async (req, res) => {
       orderstext: replyText
     });
 
-
-
-
-
   } catch (e) {
     console.error(e);
     res.json({
@@ -73,5 +69,62 @@ app.post("/salesiq-shopify", async (req, res) => {
     });
   }
 });
+
+app.post("/salesiq-products", async (req, res) => {
+  try {
+    const apiUrl =
+      `https://${SHOPIFY_STORE}/admin/api/2024-10/products.json?limit=10`;
+
+    const shopifyRes = await fetch(apiUrl, {
+      method: "GET",
+      headers: {
+        "X-Shopify-Access-Token": ADMIN_TOKEN,
+        "Content-Type": "application/json"
+      }
+    });
+
+    const data = await shopifyRes.json();
+
+    if (!data.products || data.products.length === 0) {
+      return res.json({
+        orderstext: "No products found in the store."
+      });
+    }
+
+    // Build SalesIQ cards
+    const cards = data.products.map(p => {
+      const price = p.variants?.[0]?.price || "N/A";
+      const image = p.images?.[0]?.src || "";
+      const productUrl = `https://${SHOPIFY_STORE}/products/${p.handle}`;
+
+      return {
+        title: p.title,
+        subtitle: `${price} USD`,
+        image: image,
+        buttons: [
+          {
+            label: "View Product",
+            type: "url",
+            value: productUrl
+          }
+        ]
+      };
+    });
+
+    res.json({
+      action: "show",
+      type: "cards",
+      cards: cards
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.json({
+      orderstext: "Error fetching products from Shopify."
+    });
+  }
+});
+
+
 
 app.listen(3000, () => console.log("Server running on port 3000"));

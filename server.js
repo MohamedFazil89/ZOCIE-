@@ -739,6 +739,256 @@ app.use((err, req, res, next) => {
   });
 });
 
+// =====================================================
+// SUCCESS PAGE - Bot Generated Successfully
+// =====================================================
+
+app.get("/", (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Generated Successfully!</title>
+    <script src="https://cdn.tailwindcss.com"><\/script>
+</head>
+<body class="bg-gradient-to-br from-green-50 to-blue-100 min-h-screen">
+    <div class="container mx-auto px-4 py-12">
+        <!-- Success Header -->
+        <div class="text-center mb-12">
+            <div class="text-8xl mb-6">🎉</div>
+            <h1 class="text-5xl font-bold text-gray-800 mb-4">Your Bot is Ready!</h1>
+            <p class="text-xl text-gray-600">Self-driving bot configured and ready to deploy</p>
+        </div>
+
+        <!-- Main Card -->
+        <div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden">
+            <!-- Success Banner -->
+            <div class="bg-gradient-to-r from-green-500 to-green-600 p-6 text-center">
+                <h2 class="text-2xl font-bold text-white">✅ Successfully Connected!</h2>
+            </div>
+
+            <div class="p-8">
+                <!-- Business Info -->
+                <div id="businessInfo" class="mb-8">
+                    <div class="bg-gray-50 rounded-lg p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-xl font-bold text-gray-800">Store Information</h3>
+                            <span id="businessId" class="text-sm text-gray-500 font-mono"></span>
+                        </div>
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-sm text-gray-600">Business Name</p>
+                                <p id="businessName" class="font-semibold text-gray-800">fractix</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Shop Domain</p>
+                                <p id="shopDomain" class="font-semibold text-gray-800">fractix.myshopify.com</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Products</p>
+                                <p id="productCount" class="font-semibold text-gray-800">Loading...</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Status</p>
+                                <p class="font-semibold text-green-600">✓ Active</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generated Features -->
+                <div class="mb-8">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Auto-Generated Features</h3>
+                    <div id="featuresList" class="grid md:grid-cols-2 gap-3">
+                        <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                            <span class="text-green-500 text-xl mr-3">✓</span>
+                            <span class="text-gray-700">Browse Store Deals</span>
+                        </div>
+                        <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                            <span class="text-green-500 text-xl mr-3">✓</span>
+                            <span class="text-gray-700">Track Orders</span>
+                        </div>
+                        <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                            <span class="text-green-500 text-xl mr-3">✓</span>
+                            <span class="text-gray-700">Add to Cart</span>
+                        </div>
+                        <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                            <span class="text-green-500 text-xl mr-3">✓</span>
+                            <span class="text-gray-700">Buy Now</span>
+                        </div>
+                        <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                            <span class="text-green-500 text-xl mr-3">✓</span>
+                            <span class="text-gray-700">Process Returns</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Download Bot Script -->
+                <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-8">
+                    <div class="flex items-start justify-between mb-4">
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-800 mb-2">📥 Download Your Bot Script</h3>
+                            <p class="text-gray-600 text-sm">Deluge script ready to deploy in Zoho SalesIQ</p>
+                        </div>
+                        <button 
+                            onclick="downloadScript()"
+                            class="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition flex items-center space-x-2"
+                        >
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                            </svg>
+                            <span>Download Script</span>
+                        </button>
+                    </div>
+                    <div class="bg-white rounded p-4">
+                        <p class="text-sm text-gray-600 mb-2">File name:</p>
+                        <code id="scriptFilename" class="text-sm bg-gray-100 px-3 py-2 rounded block">bot_fractix.deluge</code>
+                    </div>
+                </div>
+
+                <!-- Deployment Steps -->
+                <div class="mb-8">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">🚀 Next Steps: Deploy Your Bot</h3>
+                    <div class="space-y-4">
+                        <div class="flex items-start">
+                            <div class="bg-blue-100 w-8 h-8 rounded-full flex items-center justify-center mr-4 flex-shrink-0">
+                                <span class="font-bold text-blue-600">1</span>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-gray-800">Download the bot script</h4>
+                                <p class="text-sm text-gray-600">Click the download button above to get your custom Deluge script</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start">
+                            <div class="bg-blue-100 w-8 h-8 rounded-full flex items-center justify-center mr-4 flex-shrink-0">
+                                <span class="font-bold text-blue-600">2</span>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-gray-800">Open Zoho SalesIQ</h4>
+                                <p class="text-sm text-gray-600">Go to Settings → Bots → Create new bot → Choose "Message Handler"</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start">
+                            <div class="bg-blue-100 w-8 h-8 rounded-full flex items-center justify-center mr-4 flex-shrink-0">
+                                <span class="font-bold text-blue-600">3</span>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-gray-800">Paste and publish</h4>
+                                <p class="text-sm text-gray-600">Copy the script content, paste into SalesIQ editor, and click "Publish"</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start">
+                            <div class="bg-green-100 w-8 h-8 rounded-full flex items-center justify-center mr-4 flex-shrink-0">
+                                <span class="font-bold text-green-600">✓</span>
+                            </div>
+                            <div>
+                                <h4 class="font-semibold text-gray-800">Done! Your bot is live</h4>
+                                <p class="text-sm text-gray-600">Start chatting with your customers immediately</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex gap-4">
+                    <a href="https://dev.salesiq.zoho.com" target="_blank" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-lg font-semibold text-center hover:shadow-xl transition">
+                        Go to SalesIQ Dashboard
+                    </a>
+                    <button 
+                        onclick="location.reload()"
+                        class="flex-1 bg-gray-200 text-gray-800 py-4 rounded-lg font-semibold hover:bg-gray-300 transition"
+                    >
+                        Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Additional Info -->
+        <div class="mt-12 max-w-4xl mx-auto grid md:grid-cols-3 gap-6">
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <div class="text-3xl mb-3">📊</div>
+                <h3 class="font-bold text-gray-800 mb-2">Real-Time Sync</h3>
+                <p class="text-sm text-gray-600">Bot automatically syncs with your store. Add products anytime!</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <div class="text-3xl mb-3">🔐</div>
+                <h3 class="font-bold text-gray-800 mb-2">Secure Connection</h3>
+                <p class="text-sm text-gray-600">Your credentials are encrypted and never exposed</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-lg">
+                <div class="text-3xl mb-3">💬</div>
+                <h3 class="font-bold text-gray-800 mb-2">24/7 Support</h3>
+                <p class="text-sm text-gray-600">Need help? Our support team is always available</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadProductCount() {
+            try {
+                const response = await fetch('${BACKEND_URL}/salesiq-deals', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                document.getElementById('productCount').textContent = data.cards.length + ' products';
+            } catch (error) {
+                document.getElementById('productCount').textContent = 'N/A';
+            }
+        }
+
+        function downloadScript() {
+            const script = \`// =====================================================
+// AUTO-GENERATED ZOBOT SCRIPT FOR FRACTIX
+// Generated: \${new Date().toISOString()}
+// =====================================================
+
+BACKEND_URL = "https://zocie.onrender.com";
+
+function getDeals() {
+  return zoho.salesiq.messageTemplate.getCards("deals");
+}
+
+function trackOrder(email) {
+  return zoho.salesiq.messageTemplate.getCards("order_tracking");
+}
+
+function addToCart(variantId) {
+  return zoho.salesiq.messageTemplate.getCards("add_to_cart");
+}
+
+// More features coming soon...
+\`;
+            
+            const blob = new Blob([script], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'bot_fractix.deluge';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        loadProductCount();
+    </script>
+</body>
+</html>`);
+});
+
+// =====================================================
+// HEALTH CHECK
+// =====================================================
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    store: SHOPIFY_STORE,
+    timestamp: new Date().toISOString()
+  });
+});
+
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Shopify SalesIQ Backend running on port ${PORT}`);

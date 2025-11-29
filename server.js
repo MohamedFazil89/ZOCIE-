@@ -13,8 +13,10 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN_KEY; // read from .env
 app.post("/salesiq-shopify", async (req, res) => {
   try {
     // 1) Get customer email from request body
-    const customerEmail = (req.body && req.body.email) || "";
-    if (!customerEmail) {
+    const payload = req.body;
+    const email = payload.session?.email?.value;
+    // const customerEmail = (req.body && req.body.email) || "";
+    if (!email) {
       return res.json({
         action: "reply",
         replies: ["No email provided. Cannot find your orders."]
@@ -56,9 +58,9 @@ app.post("/salesiq-shopify", async (req, res) => {
     })
     // Response for SalesIQ
     res.json({
-  action: "reply",
-  replies: [replyText]
-});
+      action: "reply",
+      replies: [replyText]
+    });
 
 
 

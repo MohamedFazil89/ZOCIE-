@@ -27,7 +27,7 @@ app.post("/salesiq-shopify", async (req, res) => {
     // status=any so cancelled/closed etc. also show
     const apiUrl =
       `https://${SHOPIFY_STORE}/admin/api/2024-10/orders.json` +
-      `?status=any&email=${encodeURIComponent(customerEmail)}`;
+      `?status=any&email=${encodeURIComponent(email)}`;
 
     const shopifyRes = await fetch(apiUrl, {
       method: "GET",
@@ -48,8 +48,8 @@ app.post("/salesiq-shopify", async (req, res) => {
     });
 
     const replyText = orders.length
-      ? `Orders for ${customerEmail}:\n` + orders.join("\n")
-      : `No orders found for ${customerEmail}.`;
+      ? `Orders for ${email}:\n` + orders.join("\n")
+      : `No orders found for ${email}.`;
 
     console.log({
       action: "reply",

@@ -25,7 +25,7 @@ const API_VERSION = "2024-10";
 const BASE_URL = process.env.BASE_URL || "https://zocie.onrender.com";
 
 // 🔴 FIX: Add these missing variables
-const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEYS;
+const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
 
 // Validate required env vars on startup

@@ -57,15 +57,10 @@ app.post("/salesiq-shopify", async (req, res) => {
       // status: orders_status
     })
     // Response for SalesIQ
-    return res.json({
-      action: "reply",
-      replies: [
-        {
-          type: "text",
-          text: `Orders for ${email}:\n#1002 - 598.45 USD`
-        }
-      ]
+    res.json({
+      orderstext: replyText
     });
+
 
 
 

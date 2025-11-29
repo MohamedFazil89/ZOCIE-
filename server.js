@@ -193,54 +193,74 @@ app.post("/salesiq-track-order", async (req, res) => {
     });
   }
 });
+// =====================================================
+// BACKEND - ADD TO CART ROUTE
+// Creates/Updates Shopify Draft Orders
+// =====================================================
 
-// =====================================================
-// 3. ADD TO CART - Create/Update Draft Order
-// =====================================================
 app.post("/salesiq-add-to-cart", async (req, res) => {
   try {
-    const payload = req.body;
-    const email = payload.session?.email?.value || payload.email;
-    const variantId = payload.variant_id;
-    const quantity = payload.quantity || 1;
-
-    if (!email) {
-      return res.json({
-        action: "reply",
-        replies: ["Please provide your email to add items to cart."]
-      });
+    
+    // Get data from Zobot
+    const variantId = req.body.variant_id || req.query.variant_id;
+    const quantity = req.body.quantity || req.query.quantity || 1;
+    
+    // Get email from session or body
+    let email = req.body.email || req.query.email;
+    if (!email && req.session) {
+      email = req.session.email?.value || req.session.email;
     }
-
+    
+    // Validate inputs
     if (!variantId) {
       return res.json({
         action: "reply",
-        replies: ["Product information missing. Please try again."]
+        replies: ["❌ Product information missing. Please try again."]
       });
     }
-
-    // Check if customer has existing draft order (cart)
+    
+    // Fallback email if not provided
+    if (!email) {
+      email = `guest-${Date.now()}@fractix.local`;
+    }
+    
+    console.log(`Adding to cart - Variant: ${variantId}, Qty: ${quantity}, Email: ${email}`);
+    
+    // Fetch existing draft orders
     const draftsData = await shopifyRequest(
-      `/draft_orders.json?status=open&limit=1`
+      `/draft_orders.json?status=open&limit=50`
     );
-
+    
     let draftOrder;
     
     if (draftsData.draft_orders && draftsData.draft_orders.length > 0) {
-      // Update existing draft order
-      const existingDraft = draftsData.draft_orders[0];
+      
+      // Find draft order for this customer or use first one
+      let existingDraft = draftsData.draft_orders[0];
+      
+      // Update existing draft order - add line item
+      const lineItems = existingDraft.line_items || [];
+      
+      // Check if variant already in cart
+      const existingItem = lineItems.find(item => item.variant_id == variantId);
+      
+      if (existingItem) {
+        // Update quantity
+        existingItem.quantity += parseInt(quantity);
+      } else {
+        // Add new item
+        lineItems.push({
+          variant_id: parseInt(variantId),
+          quantity: parseInt(quantity)
+        });
+      }
       
       const updateBody = {
         draft_order: {
-          line_items: [
-            ...existingDraft.line_items,
-            {
-              variant_id: variantId,
-              quantity: quantity
-            }
-          ]
+          line_items: lineItems
         }
       };
-
+      
       const updated = await shopifyRequest(
         `/draft_orders/${existingDraft.id}.json`,
         "PUT",
@@ -248,21 +268,23 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
       );
       
       draftOrder = updated.draft_order;
+      
     } else {
+      
       // Create new draft order
       const createBody = {
         draft_order: {
           email: email,
           line_items: [
             {
-              variant_id: variantId,
-              quantity: quantity
+              variant_id: parseInt(variantId),
+              quantity: parseInt(quantity)
             }
           ],
-          note: "Created via SalesIQ Bot"
+          note: "Created via SalesIQ Zobot"
         }
       };
-
+      
       const created = await shopifyRequest(
         "/draft_orders.json",
         "POST",
@@ -271,40 +293,43 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
       
       draftOrder = created.draft_order;
     }
-
+    
+    // Calculate totals
     const itemCount = draftOrder.line_items.reduce((sum, item) => sum + item.quantity, 0);
-    const totalPrice = draftOrder.total_price;
-
-    res.json({
+    const totalPrice = draftOrder.total_price || "0.00";
+    
+    // Get checkout URL
+    const invoiceUrl = draftOrder.invoice_url || "#";
+    
+    // Return success response
+    return res.json({
       action: "reply",
       replies: [
         `✅ Added to cart!\n\n🛒 Cart: ${itemCount} item(s)\n💰 Total: $${totalPrice} USD`
       ],
-      buttons: [
-        {
-          label: "View Cart",
-          type: "url",
-          value: draftOrder.invoice_url
-        },
-        {
-          label: "Checkout",
-          type: "invoke.function",
-          value: {
-            function_name: "checkout",
-            draft_order_id: draftOrder.id
-          }
-        }
+      suggestions: [
+        "🛍️ Browse More",
+        "📦 View Cart",
+        "💳 Checkout"
       ]
     });
-
+    
   } catch (err) {
     console.error("Error adding to cart:", err);
-    res.json({
+    
+    return res.json({
       action: "reply",
-      replies: ["Couldn't add item to cart. Please try again."]
+      replies: [
+        `⚠️ Error adding to cart: ${err.message}\n\nPlease try again or contact support.`
+      ],
+      suggestions: [
+        "🛍️ Browse Deals",
+        "🔍 Track Order"
+      ]
     });
   }
 });
+
 
 // =====================================================
 // 4. BUY NOW - Create Order Instantly

@@ -1,477 +1,547 @@
-// server.js - Complete Shopify SalesIQ Integration Backend
-// FINAL CLEAN VERSION - No OAuth, No Legacy Code
+// server.js - Auto-Generated Bot System
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 
-const app = express();
-app.use(express.json());
 dotenv.config();
 
-const SHOPIFY_STORE = process.env.SHOPIFY_STORE || "fractix.myshopify.com";
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN_KEY;
+const app = express();
+app.use(express.json());
+
+// CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+// Storage
+const oauthStates = new Map();
+const connectedStores = new Map(); // Store: { shop, accessToken, businessId, botScript }
+
+// Config
 const API_VERSION = "2024-10";
+const BASE_URL = process.env.BASE_URL || "https://zocie.onrender.com";
+const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEYS;
+const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
 
-// =====================================================
-// HELPER: SHOPIFY REQUEST FUNCTION (SINGLE DEFINITION)
-// =====================================================
-
-async function shopifyRequest(endpoint, method = "GET", body = null) {
-  const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}${endpoint}`;
-  const options = {
-    method,
-    headers: {
-      "X-Shopify-Access-Token": ADMIN_TOKEN,
-      "Content-Type": "application/json"
-    }
-  };
-  
-  if (body) {
-    options.body = JSON.stringify(body);
-  }
-
-  try {
-    const response = await fetch(url, options);
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error(`Shopify API Error on ${endpoint}:`, error);
-    throw error;
-  }
+// Validate config
+if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+  console.error('❌ Missing SHOPIFY_API_KEY or SHOPIFY_API_SECRET');
 }
 
 // =====================================================
-// 1. DEALS OF THE DAY - GET TOP 3 PRODUCTS
+// OAUTH FLOW - Auto-Bot Generation
 // =====================================================
 
-app.post("/salesiq-deals", async (req, res) => {
-  try {
-    const data = await shopifyRequest("/products.json?limit=10&sort=created_at:desc");
-    const products = data.products || [];
+app.get("/api/shopify/auth/start", (req, res) => {
+  const shop = req.query.shop;
+  
+  if (!shop) {
+    return res.status(400).json({ error: "Shop parameter required" });
+  }
 
-    if (products.length === 0) {
-      return res.json({
-        action: "reply",
-        replies: ["No deals available right now."]
+  if (!SHOPIFY_API_KEY) {
+    return res.status(500).json({ 
+      error: "SHOPIFY_API_KEY not configured" 
+    });
+  }
+
+  const state = Math.random().toString(36).substring(2, 15) + 
+                Math.random().toString(36).substring(2, 15);
+  
+  oauthStates.set(state, { shop, timestamp: Date.now() });
+  
+  const redirectUri = `${BASE_URL}/api/shopify/auth/callback`;
+  const scopes = 'read_products,read_orders,read_draft_orders';
+  
+  const authUrl = `https://${shop}/admin/oauth/authorize?` +
+    `client_id=${SHOPIFY_API_KEY}&` +
+    `scope=${scopes}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `state=${state}`;
+
+  console.log('🔗 OAuth started for:', shop);
+  res.json({ authUrl, state });
+});
+
+app.get("/api/shopify/auth/callback", async (req, res) => {
+  try {
+    const { code, shop, state } = req.query;
+
+    console.log('📥 OAuth callback for:', shop);
+
+    // Verify state
+    if (!oauthStates.has(state)) {
+      return res.status(403).send("Invalid state - please try again");
+    }
+
+    const stateData = oauthStates.get(state);
+    if (Date.now() - stateData.timestamp > 600000) {
+      oauthStates.delete(state);
+      return res.status(403).send("State expired - please try again");
+    }
+
+    oauthStates.delete(state);
+
+    // Exchange code for access token
+    const tokenResponse = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: SHOPIFY_API_KEY,
+        client_secret: SHOPIFY_API_SECRET,
+        code
+      })
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error('❌ Token exchange failed:', errorText);
+      throw new Error('Token exchange failed');
+    }
+
+    const { access_token } = await tokenResponse.json();
+
+    if (!access_token) {
+      throw new Error("No access token received");
+    }
+
+    console.log('✅ Access token obtained for:', shop);
+
+    // Generate unique business ID
+    const businessId = `shop_${shop.replace('.myshopify.com', '')}`;
+
+    // ====================================================
+    // 🚀 AUTO-ANALYZE STORE & GENERATE BOT
+    // ====================================================
+    
+    console.log('🔍 Analyzing store:', shop);
+    
+    // Fetch store data
+    const storeData = await analyzeStore(shop, access_token);
+    
+    console.log('🤖 Generating bot script...');
+    
+    // Generate bot script
+    const botScript = generateZoBotScript(shop, businessId, storeData);
+    
+    // Store configuration
+    connectedStores.set(businessId, {
+      shop,
+      accessToken: access_token,
+      businessId,
+      botScript,
+      storeData,
+      connectedAt: new Date().toISOString()
+    });
+
+    console.log('✅ Bot generated successfully!');
+
+    // Redirect to success page with businessId
+    res.redirect(`/success.html?businessId=${businessId}&shop=${shop}`);
+
+  } catch (error) {
+    console.error('❌ OAuth error:', error);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Connection Failed</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+      </head>
+      <body class="bg-gradient-to-br from-red-50 to-orange-50 min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-12 text-center max-w-xl">
+          <div class="text-6xl mb-6">❌</div>
+          <h1 class="text-3xl font-bold text-gray-800 mb-4">Connection Failed</h1>
+          <p class="text-gray-600 mb-6">${error.message}</p>
+          <a href="/" class="inline-block bg-blue-500 hover:bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold">
+            Try Again
+          </a>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+});
+
+// =====================================================
+// STORE ANALYSIS - Auto-detect features
+// =====================================================
+
+async function analyzeStore(shop, accessToken) {
+  const storeData = {
+    products: [],
+    categories: [],
+    features: [],
+    totalProducts: 0,
+    hasOrders: false
+  };
+
+  try {
+    // Fetch products
+    const productsResponse = await fetch(
+      `https://${shop}/admin/api/${API_VERSION}/products.json?limit=10`,
+      {
+        headers: { 
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (productsResponse.ok) {
+      const { products } = await productsResponse.json();
+      storeData.products = products || [];
+      storeData.totalProducts = products?.length || 0;
+
+      // Extract categories
+      const productTypes = [...new Set(products.map(p => p.product_type).filter(Boolean))];
+      storeData.categories = productTypes.slice(0, 5);
+
+      // Detect features
+      storeData.features = detectStoreFeatures(products);
+    }
+
+    // Check for orders (lightweight check)
+    const ordersResponse = await fetch(
+      `https://${shop}/admin/api/${API_VERSION}/orders.json?limit=1`,
+      {
+        headers: { 
+          'X-Shopify-Access-Token': accessToken 
+        }
+      }
+    );
+
+    if (ordersResponse.ok) {
+      const { orders } = await ordersResponse.json();
+      storeData.hasOrders = orders && orders.length > 0;
+    }
+
+  } catch (error) {
+    console.error('Error analyzing store:', error);
+  }
+
+  return storeData;
+}
+
+function detectStoreFeatures(products) {
+  const features = [
+    { name: 'Product Browsing', enabled: true, reason: 'Products detected' },
+    { name: 'Order Tracking', enabled: true, reason: 'Always enabled' }
+  ];
+
+  if (products && products.length > 0) {
+    // Check for variants
+    const hasVariants = products.some(p => p.variants && p.variants.length > 1);
+    if (hasVariants) {
+      features.push({ 
+        name: 'Size/Color Selection', 
+        enabled: true, 
+        reason: 'Variants detected' 
       });
     }
 
-    // Take top 3 products
-    const topProducts = products.slice(0, 3);
+    // Check for images
+    const hasImages = products.some(p => p.images && p.images.length > 0);
+    if (hasImages) {
+      features.push({ 
+        name: 'Visual Product Cards', 
+        enabled: true, 
+        reason: 'Product images found' 
+      });
+    }
 
-    // Build elements array for official SalesIQ format
-    const elements = topProducts.map(p => {
-      const v = p.variants?.[0];
-      const price = v?.price || "N/A";
-      const compare = v?.compare_at_price;
-      const img = p.images?.[0]?.src || "";
-      const productUrl = `https://${SHOPIFY_STORE}/products/${p.handle}`;
+    // Check for discounts
+    const hasDiscounts = products.some(p => 
+      p.variants && p.variants.some(v => v.compare_at_price && v.compare_at_price > v.price)
+    );
+    if (hasDiscounts) {
+      features.push({ 
+        name: 'Deals & Discounts', 
+        enabled: true, 
+        reason: 'Sale prices detected' 
+      });
+    }
+  }
 
-      let subtitle = `$${price} USD`;
-      if (compare && parseFloat(compare) > parseFloat(price)) {
-        const discount = Math.round(((compare - price) / compare) * 100);
-        subtitle = `🔥 $${price} USD (Save ${discount}%)`;
+  return features;
+}
+
+// =====================================================
+// BOT SCRIPT GENERATION
+// =====================================================
+
+function generateZoBotScript(shop, businessId, storeData) {
+  const webhookBase = `${BASE_URL}/api/bot/${businessId}`;
+  
+  return `
+// =====================================================
+// AUTO-GENERATED ZOBOT FOR ${shop}
+// Generated: ${new Date().toISOString()}
+// Business ID: ${businessId}
+// =====================================================
+
+// Configuration
+BACKEND_URL = "${BASE_URL}";
+BUSINESS_ID = "${businessId}";
+SHOP_DOMAIN = "${shop}";
+
+// =====================================================
+// GREETING FLOW
+// =====================================================
+response = {"action":"reply","replies":["👋 Welcome to ${shop.replace('.myshopify.com', '')}! I'm your shopping assistant."]};
+response.put("suggestions", ["🛍️ Browse Products", "📦 Track Order", "💬 Help"]);
+
+// =====================================================
+// PRODUCT BROWSING FLOW
+// =====================================================
+if(input.containsIgnoreCase("browse") || input.containsIgnoreCase("products") || input.containsIgnoreCase("shop"))
+{
+    // Call backend to fetch products
+    endpoint = BACKEND_URL + "/api/bot/" + BUSINESS_ID + "/products";
+    
+    productResponse = invokeurl [
+        url: endpoint
+        type: POST
+        parameters: {"session_id": visitor.get("id")}
+        headers: {"Content-Type": "application/json"}
+    ];
+    
+    // Display product cards
+    if(productResponse.get("cards") != null)
+    {
+        response = {"action":"reply","replies":["Here are our featured products:"]};
+        response.put("cards", productResponse.get("cards"));
+    }
+}
+
+// =====================================================
+// ORDER TRACKING FLOW
+// =====================================================
+else if(input.containsIgnoreCase("track") || input.containsIgnoreCase("order") || input.containsIgnoreCase("status"))
+{
+    // Ask for email if not provided
+    if(visitor.get("email") == null || visitor.get("email") == "")
+    {
+        response = {"action":"reply","replies":["Please provide your email address to track your order:"]};
+        response.put("input_type", "email");
+    }
+    else
+    {
+        // Call backend to track order
+        endpoint = BACKEND_URL + "/api/bot/" + BUSINESS_ID + "/track-order";
+        
+        trackResponse = invokeurl [
+            url: endpoint
+            type: POST
+            parameters: {"email": visitor.get("email"), "session_id": visitor.get("id")}
+            headers: {"Content-Type": "application/json"}
+        ];
+        
+        response = trackResponse;
+    }
+}
+
+// =====================================================
+// ADD TO CART FLOW
+// =====================================================
+else if(input.containsIgnoreCase("add to cart") || input.containsIgnoreCase("buy"))
+{
+    // Extract variant ID from button click or context
+    variantId = context.get("selected_variant_id");
+    
+    if(variantId != null)
+    {
+        endpoint = BACKEND_URL + "/api/bot/" + BUSINESS_ID + "/add-to-cart";
+        
+        cartResponse = invokeurl [
+            url: endpoint
+            type: POST
+            parameters: {"variant_id": variantId, "email": visitor.get("email"), "session_id": visitor.get("id")}
+            headers: {"Content-Type": "application/json"}
+        ];
+        
+        response = cartResponse;
+    }
+}
+
+// =====================================================
+// HELP & FAQ FLOW
+// =====================================================
+else if(input.containsIgnoreCase("help") || input.containsIgnoreCase("support"))
+{
+    response = {"action":"reply","replies":["How can I help you today?"]};
+    response.put("suggestions", [
+        "🛍️ Browse Products",
+        "📦 Track My Order",
+        "💳 Payment Methods",
+        "🚚 Shipping Info",
+        "👤 Talk to Human"
+    ]);
+}
+
+// =====================================================
+// DEFAULT FALLBACK
+// =====================================================
+else
+{
+    response = {"action":"reply","replies":["I'm here to help! You can:"]};
+    response.put("suggestions", ["🛍️ Browse Products", "📦 Track Order", "💬 Get Help"]);
+}
+
+// Return response
+response;
+
+// =====================================================
+// DETECTED FEATURES:
+${storeData.features.map(f => `// ✅ ${f.name} - ${f.reason}`).join('\n')}
+// =====================================================
+`;
+}
+
+// =====================================================
+// BOT API ENDPOINTS (Business-specific)
+// =====================================================
+
+app.post("/api/bot/:businessId/products", async (req, res) => {
+  const { businessId } = req.params;
+  const store = connectedStores.get(businessId);
+
+  if (!store) {
+    return res.status(404).json({ error: "Store not connected" });
+  }
+
+  try {
+    const response = await fetch(
+      `https://${store.shop}/admin/api/${API_VERSION}/products.json?limit=10`,
+      {
+        headers: { 
+          'X-Shopify-Access-Token': store.accessToken 
+        }
+      }
+    );
+
+    const { products } = await response.json();
+
+    const cards = (products || []).slice(0, 10).map(p => {
+      const variant = p.variants?.[0];
+      const price = variant?.price || "0";
+      const comparePrice = variant?.compare_at_price;
+      const image = p.images?.[0]?.src || "";
+
+      let subtitle = `$${price}`;
+      if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
+        const discount = Math.round(((comparePrice - price) / comparePrice) * 100);
+        subtitle = `🔥 $${price} (Save ${discount}%)`;
       }
 
       return {
         title: p.title,
-        subtitle: subtitle,
-        id: p.id.toString(),
-        image: img,
-        actions: [
-          {
-            label: "Add to Cart",
-            name: "add_to_cart_btn",
-            type: "client_action",
-            clientaction_name: "addToCart"
-          },
-          {
-            label: "Buy Now",
-            name: "buy_now_btn",
-            type: "url",
-            link: productUrl
-          },
+        subtitle,
+        image,
+        buttons: [
           {
             label: "View Details",
-            name: "view_details_btn",
             type: "url",
-            link: productUrl
+            value: `https://${store.shop}/products/${p.handle}`
+          },
+          {
+            label: "Add to Cart",
+            type: "invoke.function",
+            value: { variant_id: variant?.id, price }
           }
         ]
       };
     });
 
-    // Official SalesIQ 2025 format
-    return res.json({
-      action: "reply",
-      replies: [
-        {
-          type: "multiple-product",
-          text: "✨ Here are our top 3 deals!",
-          elements: elements
+    res.json({ cards, message: "Products loaded" });
+
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    res.status(500).json({ error: "Failed to fetch products" });
+  }
+});
+
+app.post("/api/bot/:businessId/track-order", async (req, res) => {
+  const { businessId } = req.params;
+  const { email } = req.body;
+  const store = connectedStores.get(businessId);
+
+  if (!store || !email) {
+    return res.status(400).json({ error: "Invalid request" });
+  }
+
+  try {
+    const response = await fetch(
+      `https://${store.shop}/admin/api/${API_VERSION}/orders.json?email=${encodeURIComponent(email)}&limit=1`,
+      {
+        headers: { 
+          'X-Shopify-Access-Token': store.accessToken 
         }
-      ]
-    });
-
-  } catch (err) {
-    console.error("Error in /salesiq-deals:", err);
-    return res.json({
-      action: "reply",
-      replies: ["Error loading deals. Please try again."]
-    });
-  }
-});
-
-// =====================================================
-// 2. TRACK ORDER - GET LATEST ORDER STATUS BY EMAIL
-// =====================================================
-
-app.post("/salesiq-track-order", async (req, res) => {
-  try {
-    const email = req.body.email || req.query.email;
-
-    if (!email) {
-      return res.json({
-        action: "reply",
-        replies: ["Please provide your email address to track your order."]
-      });
-    }
-
-    const data = await shopifyRequest(
-      `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=5`
-    );
-
-    if (!data.orders || data.orders.length === 0) {
-      return res.json({
-        action: "reply",
-        replies: [`No orders found for ${email}. Please check your email address.`]
-      });
-    }
-
-    const latestOrder = data.orders[0];
-    
-    const orderInfo = {
-      orderNumber: latestOrder.name,
-      createdAt: new Date(latestOrder.created_at).toLocaleDateString(),
-      totalPrice: `${latestOrder.total_price} ${latestOrder.currency}`,
-      financialStatus: latestOrder.financial_status,
-      fulfillmentStatus: latestOrder.fulfillment_status || "unfulfilled",
-      items: latestOrder.line_items.map(item => 
-        `${item.quantity}x ${item.name}`
-      ).join(", "),
-      trackingNumber: latestOrder.fulfillments?.[0]?.tracking_number || "Not available yet",
-      trackingUrl: latestOrder.fulfillments?.[0]?.tracking_url || null
-    };
-
-    let statusMessage = `📦 **Order ${orderInfo.orderNumber}**\n\n`;
-    statusMessage += `📅 Placed: ${orderInfo.createdAt}\n`;
-    statusMessage += `💰 Total: ${orderInfo.totalPrice}\n`;
-    statusMessage += `💳 Payment: ${orderInfo.financialStatus}\n`;
-    statusMessage += `🚚 Status: ${orderInfo.fulfillmentStatus}\n\n`;
-    statusMessage += `📋 Items: ${orderInfo.items}\n\n`;
-    
-    if (orderInfo.trackingNumber !== "Not available yet") {
-      statusMessage += `🔍 Tracking: ${orderInfo.trackingNumber}\n`;
-    }
-
-    const suggestions = [];
-    
-    if (orderInfo.trackingUrl) {
-      suggestions.push("Track Shipment");
-    }
-
-    if (latestOrder.fulfillment_status === "fulfilled" && !latestOrder.cancelled_at) {
-      suggestions.push("Return Order");
-    }
-
-    suggestions.push("🛍️ Browse Deals");
-
-    res.json({
-      action: "reply",
-      replies: [statusMessage],
-      suggestions: suggestions
-    });
-
-  } catch (err) {
-    console.error("Error in /salesiq-track-order:", err);
-    res.json({
-      action: "reply",
-      replies: ["Error fetching your order details. Please try again."]
-    });
-  }
-});
-
-// =====================================================
-// 3. ADD TO CART - CREATE/UPDATE DRAFT ORDERS
-// =====================================================
-
-app.post("/salesiq-add-to-cart", async (req, res) => {
-  try {
-    const variantId = req.body.variant_id || req.query.variant_id;
-    const quantity = req.body.quantity || req.query.quantity || 1;
-    
-    let email = req.body.email || req.query.email;
-    if (!email && req.session) {
-      email = req.session.email?.value || req.session.email;
-    }
-    
-    if (!variantId) {
-      return res.json({
-        action: "reply",
-        replies: ["❌ Product information missing. Please try again."]
-      });
-    }
-    
-    if (!email) {
-      email = `guest-${Date.now()}@fractix.local`;
-    }
-    
-    console.log(`Adding to cart - Variant: ${variantId}, Qty: ${quantity}, Email: ${email}`);
-    
-    const draftsData = await shopifyRequest(
-      `/draft_orders.json?status=open&limit=50`
-    );
-    
-    let draftOrder;
-    
-    if (draftsData.draft_orders && draftsData.draft_orders.length > 0) {
-      
-      let existingDraft = draftsData.draft_orders[0];
-      const lineItems = existingDraft.line_items || [];
-      
-      const existingItem = lineItems.find(item => item.variant_id == variantId);
-      
-      if (existingItem) {
-        existingItem.quantity += parseInt(quantity);
-      } else {
-        lineItems.push({
-          variant_id: parseInt(variantId),
-          quantity: parseInt(quantity)
-        });
       }
-      
-      const updateBody = {
-        draft_order: {
-          line_items: lineItems
-        }
-      };
-      
-      const updated = await shopifyRequest(
-        `/draft_orders/${existingDraft.id}.json`,
-        "PUT",
-        updateBody
-      );
-      
-      draftOrder = updated.draft_order;
-      
-    } else {
-      
-      const createBody = {
-        draft_order: {
-          email: email,
-          line_items: [
-            {
-              variant_id: parseInt(variantId),
-              quantity: parseInt(quantity)
-            }
-          ],
-          note: "Created via SalesIQ Zobot"
-        }
-      };
-      
-      const created = await shopifyRequest(
-        "/draft_orders.json",
-        "POST",
-        createBody
-      );
-      
-      draftOrder = created.draft_order;
+    );
+
+    const { orders } = await response.json();
+
+    if (!orders || orders.length === 0) {
+      return res.json({
+        action: "reply",
+        replies: [`No orders found for ${email}`]
+      });
     }
-    
-    const itemCount = draftOrder.line_items.reduce((sum, item) => sum + item.quantity, 0);
-    const totalPrice = draftOrder.total_price || "0.00";
-    
-    return res.json({
+
+    const order = orders[0];
+    const status = `📦 Order ${order.name}\n` +
+                   `Status: ${order.fulfillment_status || 'Processing'}\n` +
+                   `Total: $${order.total_price} ${order.currency}`;
+
+    res.json({
       action: "reply",
-      replies: [
-        `✅ Added to cart!\n\n🛒 Cart: ${itemCount} item(s)\n💰 Total: $${totalPrice} USD`
-      ],
-      suggestions: [
-        "🛍️ Browse More",
-        "📦 View Cart",
-        "💳 Checkout"
-      ]
+      replies: [status]
     });
-    
-  } catch (err) {
-    console.error("Error in /salesiq-add-to-cart:", err);
-    
-    return res.json({
-      action: "reply",
-      replies: [
-        `⚠️ Error adding to cart: ${err.message}\n\nPlease try again or contact support.`
-      ],
-      suggestions: [
-        "🛍️ Browse Deals",
-        "🔍 Track Order"
-      ]
-    });
+
+  } catch (error) {
+    console.error('Error tracking order:', error);
+    res.status(500).json({ error: "Failed to track order" });
   }
 });
 
 // =====================================================
-// 4. BUY NOW - CREATE ORDER INSTANTLY
+// ADMIN ENDPOINTS
 // =====================================================
 
-app.post("/salesiq-buy-now", async (req, res) => {
-  try {
-    const email = req.body.email;
-    const variantId = req.body.variant_id;
-    const quantity = req.body.quantity || 1;
+app.get("/api/business/:businessId", (req, res) => {
+  const { businessId } = req.params;
+  const store = connectedStores.get(businessId);
 
-    if (!email) {
-      return res.json({
-        action: "reply",
-        replies: ["Please provide your email to complete the purchase."]
-      });
-    }
-
-    if (!variantId) {
-      return res.json({
-        action: "reply",
-        replies: ["Product information missing. Please try again."]
-      });
-    }
-
-    const createBody = {
-      draft_order: {
-        email: email,
-        line_items: [
-          {
-            variant_id: variantId,
-            quantity: quantity
-          }
-        ],
-        note: "Quick purchase via SalesIQ Bot",
-        use_customer_default_address: true
-      }
-    };
-
-    const created = await shopifyRequest(
-      "/draft_orders.json",
-      "POST",
-      createBody
-    );
-
-    const draftOrder = created.draft_order;
-
-    res.json({
-      action: "reply",
-      replies: [
-        `🎉 Your order is ready!\n\n💰 Total: $${draftOrder.total_price} USD\n\nClick below to complete payment securely.`
-      ],
-      suggestions: [
-        "Complete Payment",
-        "🛍️ Browse More"
-      ]
-    });
-
-  } catch (err) {
-    console.error("Error in /salesiq-buy-now:", err);
-    res.json({
-      action: "reply",
-      replies: ["Couldn't process your order. Please try again."]
-    });
+  if (!store) {
+    return res.status(404).json({ error: "Store not found" });
   }
+
+  res.json({
+    businessId: store.businessId,
+    shop: store.shop,
+    connectedAt: store.connectedAt,
+    features: store.storeData.features,
+    totalProducts: store.storeData.totalProducts,
+    botScriptReady: true
+  });
 });
 
-// =====================================================
-// 5. RETURN ORDER - INITIATE REFUND PROCESS
-// =====================================================
+app.get("/api/business/:businessId/bot-script", (req, res) => {
+  const { businessId } = req.params;
+  const store = connectedStores.get(businessId);
 
-app.post("/salesiq-return-order", async (req, res) => {
-  try {
-    const orderId = req.body.order_id;
-    const orderNumber = req.body.order_number;
-    const reason = req.body.reason || "Customer request";
-
-    if (!orderId) {
-      return res.json({
-        action: "reply",
-        replies: ["Order information missing. Please try again."]
-      });
-    }
-
-    const orderData = await shopifyRequest(`/orders/${orderId}.json`);
-    const order = orderData.order;
-
-    if (!order) {
-      return res.json({
-        action: "reply",
-        replies: ["Order not found. Please check the order number."]
-      });
-    }
-
-    if (order.cancelled_at) {
-      return res.json({
-        action: "reply",
-        replies: ["This order was cancelled and cannot be returned."]
-      });
-    }
-
-    if (order.financial_status !== "paid") {
-      return res.json({
-        action: "reply",
-        replies: ["This order hasn't been paid yet and cannot be returned."]
-      });
-    }
-
-    const calculateBody = {
-      refund: {
-        shipping: {
-          full_refund: true
-        },
-        refund_line_items: order.line_items.map(item => ({
-          line_item_id: item.id,
-          quantity: item.quantity,
-          restock_type: "return"
-        }))
-      }
-    };
-
-    const calculated = await shopifyRequest(
-      `/orders/${orderId}/refunds/calculate.json`,
-      "POST",
-      calculateBody
-    );
-
-    const refundAmount = calculated.refund?.refund_line_items?.reduce(
-      (sum, item) => sum + parseFloat(item.subtotal),
-      0
-    ) || 0;
-
-    res.json({
-      action: "reply",
-      replies: [
-        `🔄 **Return Request for Order ${orderNumber}**\n\n` +
-        `We'll process a refund of $${refundAmount.toFixed(2)} ${order.currency}\n\n` +
-        `⏱️ Refunds typically take 5-7 business days to process.\n` +
-        `📧 You'll receive a confirmation email shortly.\n\n` +
-        `Need help? Contact our support team.`
-      ],
-      suggestions: [
-        "Track Return Status",
-        "🛍️ Browse Deals"
-      ]
-    });
-
-  } catch (err) {
-    console.error("Error in /salesiq-return-order:", err);
-    res.json({
-      action: "reply",
-      replies: ["Couldn't process your return request. Please contact support."]
-    });
+  if (!store) {
+    return res.status(404).json({ error: "Store not found" });
   }
+
+  res.setHeader('Content-Type', 'text/plain');
+  res.setHeader('Content-Disposition', `attachment; filename="zobot-${businessId}.deluge"`);
+  res.send(store.botScript);
 });
 
 // =====================================================
@@ -480,21 +550,9 @@ app.post("/salesiq-return-order", async (req, res) => {
 
 app.get("/health", (req, res) => {
   res.json({ 
-    status: "ok", 
-    store: SHOPIFY_STORE,
+    status: "ok",
+    connectedStores: connectedStores.size,
     timestamp: new Date().toISOString()
-  });
-});
-
-// =====================================================
-// ERROR HANDLER
-// =====================================================
-
-app.use((err, req, res, next) => {
-  console.error("Server error:", err);
-  res.status(500).json({
-    action: "reply",
-    replies: ["An unexpected error occurred. Please try again."]
   });
 });
 
@@ -504,13 +562,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Shopify SalesIQ Backend running on port ${PORT}`);
-  console.log(`📍 Store: ${SHOPIFY_STORE}`);
-  console.log(`✅ Health check: http://localhost:${PORT}/health`);
-  console.log(`✅ Routes available:`);
-  console.log(`   POST /salesiq-deals`);
-  console.log(`   POST /salesiq-track-order`);
-  console.log(`   POST /salesiq-add-to-cart`);
-  console.log(`   POST /salesiq-buy-now`);
-  console.log(`   POST /salesiq-return-order`);
+  console.log(`🚀 Auto-Bot Server running on port ${PORT}`);
+  console.log(`🔑 API Key configured: ${SHOPIFY_API_KEY ? '✅' : '❌'}`);
+  console.log(`📍 Base URL: ${BASE_URL}`);
 });

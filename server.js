@@ -32,75 +32,65 @@ async function shopifyRequest(endpoint, method = "GET", body = null) {
 app.post("/salesiq-deals", async (req, res) => {
   try {
     const data = await shopifyRequest("/products.json?limit=10&sort=created_at:desc");
-    const prods = data.products || [];
-    if (prods.length === 0) {
+    const products = data.products || [];
+
+    if (products.length === 0) {
       return res.json({
+        platform: "ZOHOSALESIQ",
         action: "reply",
-        replies: ["No deals available at the moment. Check back soon! 🎉"]
+        replies: [
+          { text: "No deals available right now!" }
+        ]
       });
     }
 
-    // take top 3 (or fewer if less available)
-    const top = prods.slice(0, 3);
-
-    const elements = top.map(p => {
-      const var0 = p.variants && p.variants[0];
-      const price = var0?.price || "N/A";
-      const compare = var0?.compare_at_price;
-      const img = p.images && p.images[0]?.src || "";
-      const productUrl = `https://${SHOPIFY_STORE}/products/${p.handle}`;
+    const elements = products.slice(0, 10).map(p => {
+      const v = p.variants?.[0];
+      const price = v?.price || "N/A";
+      const compare = v?.compare_at_price;
+      const img = p.images?.[0]?.src || "";
+      const url = `https://${SHOPIFY_STORE}/products/${p.handle}`;
 
       let subtitle = `$${price} USD`;
       if (compare && parseFloat(compare) > parseFloat(price)) {
-        const disc = Math.round(((parseFloat(compare) - parseFloat(price)) / parseFloat(compare)) * 100);
-        subtitle = `🔥 $${price} USD (Save ${disc}%)`;
+        const discount = Math.round(((compare - price) / compare) * 100);
+        subtitle = `🔥 $${price} (Save ${discount}%)`;
       }
 
       return {
-        id: p.id.toString(),              // mandatory
+        id: p.id.toString(),
         title: p.title,
         subtitle: subtitle,
         image: img,
         actions: [
           {
-            label: "Add to Cart",
-            name: "add_to_cart_btn_" + p.id,        // unique button name
-            type: "client_action",                   // or "url" depending on support
-            clientaction_name: "addToCart",          // must match your client action handler
-            // you can optionally pass metadata via other fields if required
-          },
-          {
-            label: "Buy Now",
-            name: "buy_now_btn_" + p.id,
-            type: "client_action",
-            clientaction_name: "buyNow",
-          },
-          {
-            label: "View Details",
-            name: "view_details_" + p.id,
+            label: "View More",
+            name: "view_" + p.id,
             type: "url",
-            link: productUrl
+            link: url
           }
         ]
       };
     });
 
-    const replyCard = {
-      type: "multiple-product",
-      text: "✨ Here are our top 3 deals!",
-      elements: elements
-    };
-
     return res.json({
+      platform: "ZOHOSALESIQ",
       action: "reply",
-      replies: [ replyCard ]
+      replies: [
+        {
+          type: "carousel",
+          text: "Here are today's deals",
+          elements: elements
+        }
+      ]
     });
 
   } catch (err) {
-    console.error("Error fetching deals:", err);
+    console.error("Error:", err);
     return res.json({
+      platform: "ZOHOSALESIQ",
       action: "reply",
-      replies: ["Sorry, couldn't load deals right now. Please try again! 😔"]
+      replies: [{ text: "Failed to load deals. Try later." }]
     });
   }
 });

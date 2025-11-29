@@ -19,13 +19,22 @@ dotenv.config();
 // Storage for OAuth states
 const oauthStates = new Map();
 
-
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || "fractix.myshopify.com";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN_KEY;
 const API_VERSION = "2024-10";
 const BASE_URL = process.env.BASE_URL || "https://zocie.onrender.com";
-const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEYS;
 
+// 🔴 FIX: Add these missing variables
+const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEYS;
+const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
+
+// Validate required env vars on startup
+if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+  console.error('❌ MISSING REQUIRED ENV VARS:');
+  console.error('   SHOPIFY_API_KEY:', SHOPIFY_API_KEY ? '✓' : '❌ MISSING');
+  console.error('   SHOPIFY_API_SECRET:', SHOPIFY_API_SECRET ? '✓' : '❌ MISSING');
+  console.error('\n   Please add these to your .env file or Render dashboard');
+}
 
 // Helper function to make Shopify API calls
 async function shopifyOAuthRequest(endpoint, method = "GET", body = null) {
@@ -45,6 +54,175 @@ async function shopifyOAuthRequest(endpoint, method = "GET", body = null) {
   const response = await fetch(url, options);
   return await response.json();
 }
+
+// =====================================================
+// OAUTH ROUTES - FIXED
+// =====================================================
+
+// Step 1: Generate OAuth URL
+app.get("/api/shopify/auth/start", (req, res) => {
+  const shop = req.query.shop;
+  
+  if (!shop) {
+    return res.status(400).json({ error: "Shop parameter required" });
+  }
+
+  // 🔴 FIX: Check if API credentials exist
+  if (!SHOPIFY_API_KEY) {
+    return res.status(500).json({ 
+      error: "Server configuration error: SHOPIFY_API_KEY not set",
+      message: "Please contact administrator to configure OAuth credentials"
+    });
+  }
+
+  // Generate random state for security
+  const state = Math.random().toString(36).substring(2, 15) + 
+                Math.random().toString(36).substring(2, 15);
+  
+  // Store state temporarily (expires in 10 minutes)
+  oauthStates.set(state, { shop, timestamp: Date.now() });
+  
+  // Build OAuth URL
+  const redirectUri = `${BASE_URL}/api/shopify/auth/callback`;
+  const authUrl = `https://${shop}/admin/oauth/authorize?` +
+    `client_id=${SHOPIFY_API_KEY}&` +
+    `scope=write_products,read_orders,write_orders,read_draft_orders,write_draft_orders&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `state=${state}`;
+
+  console.log('🔗 OAuth URL generated for shop:', shop);
+  res.json({ authUrl, state });
+});
+
+// Step 2: OAuth Callback
+app.get("/api/shopify/auth/callback", async (req, res) => {
+  try {
+    const { code, shop, state } = req.query;
+
+    console.log('📥 OAuth callback received:', { shop, hasCode: !!code, hasState: !!state });
+
+    // Verify state
+    if (!oauthStates.has(state)) {
+      console.error('❌ Invalid state parameter');
+      return res.status(403).send("Invalid state parameter - please try connecting again");
+    }
+
+    const stateData = oauthStates.get(state);
+    
+    // Check if state expired (10 minutes)
+    if (Date.now() - stateData.timestamp > 600000) {
+      oauthStates.delete(state);
+      console.error('❌ State expired');
+      return res.status(403).send("State expired - please try connecting again");
+    }
+
+    oauthStates.delete(state);
+
+    // 🔴 FIX: Check credentials before exchange
+    if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+      console.error('❌ Missing OAuth credentials');
+      return res.status(500).send("Server configuration error: OAuth credentials not configured");
+    }
+
+    // Exchange code for access token
+    const tokenUrl = `https://${shop}/admin/oauth/access_token`;
+    console.log('🔄 Exchanging code for token...');
+    
+    const tokenResponse = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: SHOPIFY_API_KEY,
+        client_secret: SHOPIFY_API_SECRET,
+        code
+      })
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error('❌ Token exchange failed:', errorText);
+      throw new Error(`Token exchange failed: ${errorText}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+
+    if (!accessToken) {
+      throw new Error("Failed to get access token");
+    }
+
+    console.log('✅ Access token obtained successfully');
+
+    // Success! Show success page
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Connection Successful</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+      </head>
+      <body class="bg-gradient-to-br from-green-50 to-blue-50 min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-12 text-center max-w-2xl">
+          <div class="text-6xl mb-6">✅</div>
+          <h1 class="text-4xl font-bold text-gray-800 mb-4">Store Connected!</h1>
+          <p class="text-xl text-gray-600 mb-8">Your Shopify store is now connected to SalesIQ</p>
+          
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
+            <p class="text-sm text-gray-700 mb-2"><strong>Store:</strong> ${shop}</p>
+            <p class="text-sm text-gray-700 mb-2"><strong>Access Token:</strong></p>
+            <code class="block bg-white p-3 rounded border text-xs break-all">${accessToken}</code>
+            <p class="text-xs text-gray-500 mt-2">Save this token securely - you'll need it for API calls</p>
+          </div>
+
+          <div class="space-y-4">
+            <h3 class="font-bold text-gray-800 mb-4">Next Steps:</h3>
+            <ol class="text-left space-y-3 text-gray-700">
+              <li class="flex items-start">
+                <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center mr-3 flex-shrink-0 text-sm">1</span>
+                <span>Save your access token in your backend's .env file as <code class="bg-gray-100 px-2 py-1 rounded text-sm">ADMIN_TOKEN_KEY</code></span>
+              </li>
+              <li class="flex items-start">
+                <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center mr-3 flex-shrink-0 text-sm">2</span>
+                <span>Test your connection by fetching products from your store</span>
+              </li>
+              <li class="flex items-start">
+                <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center mr-3 flex-shrink-0 text-sm">3</span>
+                <span>Configure your ZoBot in SalesIQ to use your backend webhooks</span>
+              </li>
+            </ol>
+          </div>
+
+          <button onclick="window.close()" class="mt-8 bg-blue-500 hover:bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold">
+            Close Window
+          </button>
+        </div>
+      </body>
+      </html>
+    `);
+
+  } catch (error) {
+    console.error('❌ OAuth callback error:', error);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Connection Failed</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+      </head>
+      <body class="bg-gradient-to-br from-red-50 to-orange-50 min-h-screen flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-12 text-center max-w-xl">
+          <div class="text-6xl mb-6">❌</div>
+          <h1 class="text-3xl font-bold text-gray-800 mb-4">Connection Failed</h1>
+          <p class="text-gray-600 mb-6">${error.message}</p>
+          <button onclick="window.history.back()" class="bg-blue-500 hover:bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold">
+            Try Again
+          </button>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+});
 
 app.post("/salesiq-deals", async (req, res) => {
   try {

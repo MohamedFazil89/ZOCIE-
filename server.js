@@ -51,7 +51,7 @@ app.post("/salesiq-shopify", async (req, res) => {
 
     console.log({
       action: "reply",
-      replies: [replyText],
+      replies: replyText,
       // status: orders_status
     })
     // Response for SalesIQ

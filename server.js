@@ -990,6 +990,134 @@ app.get("/health", (req, res) => {
 });
 
 
+// AI
+
+
+// Intent detection - No script needed!
+async function detectIntent(userMessage) {
+  const intents = {
+    track_order: /track|status|where|delivery|order/i,
+    browse_deals: /deal|product|browse|show|what.*sell/i,
+    add_cart: /add.*cart|add to cart|want to buy/i,
+    buy_now: /buy now|checkout|payment|purchase/i,
+    return_order: /return|refund|money back/i,
+  };
+
+  for (const [intent, pattern] of Object.entries(intents)) {
+    if (pattern.test(userMessage)) {
+      return { intent, confidence: 0.9 };
+    }
+  }
+  return { intent: "general_query", confidence: 0.5 };
+}
+
+// Execute action based on intent
+async function executeAction(intent, userMessage, sessionData) {
+  switch(intent) {
+    case 'track_order':
+      return await trackOrderAI(userMessage, sessionData);
+    case 'browse_deals':
+      return await browseDealsAI(userMessage);
+    case 'add_cart':
+      return await addToCartAI(userMessage, sessionData);
+    // ... etc
+  }
+}
+
+// Natural response generation
+async function generateResponse(intent, data) {
+  const responses = {
+    track_order: `📦 Found your order! Status: ${data.status}. Tracking: ${data.trackingUrl}`,
+    browse_deals: `🛍️ Here are today's top deals:\n${data.deals.map(d => `• ${d.name}: $${d.price}`).join('\n')}`,
+    add_cart: `✅ Added ${data.productName} to your cart! Your total: $${data.total}`,
+  };
+  
+  return responses[intent] || "How can I help you today?";
+}
+
+
+// Remember user context across messages
+const userSessions = new Map();
+
+class ConversationMemory {
+  constructor(userId) {
+    this.userId = userId;
+    this.history = [];
+    this.context = {
+      email: null,
+      previousActions: [],
+      preferences: {}
+    };
+  }
+
+  addMessage(role, content, metadata = {}) {
+    this.history.push({ role, content, timestamp: Date.now(), ...metadata });
+    
+    // Auto-extract info
+    if (role === 'user') {
+      const emailMatch = content.match(/[\w\.-]+@[\w\.-]+/);
+      if (emailMatch) this.context.email = emailMatch[0];
+    }
+  }
+
+  getContext() {
+    return this.context;
+  }
+
+  remember(key, value) {
+    this.context.previousActions.push({ key, value, timestamp: Date.now() });
+  }
+}
+
+
+// Instead of 5 different routes, ONE intelligent endpoint
+app.post("/zobot/message", async (req, res) => {
+  const { userId, message, sessionData } = req.body;
+
+  // Get or create session memory
+  if (!userSessions.has(userId)) {
+    userSessions.set(userId, new ConversationMemory(userId));
+  }
+  const memory = userSessions.get(userId);
+
+  // 1. Detect intent from natural language
+  const { intent } = await detectIntent(message);
+  memory.addMessage('user', message, { intent });
+
+  // 2. Use context from memory
+  const context = memory.getContext();
+
+  // 3. Execute action
+  let actionResult = await executeAction(intent, message, context);
+
+  // 4. If we need more info, ask for it
+  if (actionResult.needsInfo) {
+    return res.json({
+      action: "reply",
+      replies: [actionResult.question],
+      suggestions: actionResult.suggestions
+    });
+  }
+
+  // 5. Generate natural response
+  const response = await generateResponse(intent, actionResult);
+  memory.addMessage('bot', response);
+
+  // 6. Remember for next interaction
+  if (actionResult.remember) {
+    memory.remember(intent, actionResult.data);
+  }
+
+  res.json({
+    action: "reply",
+    replies: [response],
+    buttons: actionResult.buttons,
+    suggestions: actionResult.suggestions
+  });
+});
+
+
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Shopify SalesIQ Backend running on port ${PORT}`);

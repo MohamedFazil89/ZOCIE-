@@ -23,7 +23,7 @@ const oauthStates = new Map();
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || "fractix.myshopify.com";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN_KEY;
 const API_VERSION = "2024-10";
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+const BASE_URL = process.env.BASE_URL || "https://zocie.onrender.com";
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEYS;
 
 

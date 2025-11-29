@@ -27,6 +27,7 @@ const oauthStates = new Map(); // state -> { shop, timestamp }
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN_KEY;
 const API_VERSION = "2024-10";
 const BASE_URL = "https://zocie.onrender.com";
+const BACKEND_URL = "https://zocie.onrender.com"
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;

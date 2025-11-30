@@ -1395,8 +1395,9 @@ app.get("/api/debug/businesses", (req, res) => {
         businesses: businesses
     });
 });
+
 // =====================================================
-// MULTI-TENANT ZOBOT WEBHOOK (WITH DEBUGGING)
+// MULTI-TENANT ZOBOT WEBHOOK (FIXED VERSION)
 // =====================================================
 
 app.post("/api/zobot/:businessId", async (req, res) => {
@@ -1405,10 +1406,8 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     
     console.log(`\n${'='.repeat(60)}`);
     console.log(`📨 WEBHOOK REQUEST RECEIVED`);
-    console.log(`${'='.repeat(60)}`);
     console.log(`Business ID: ${businessId}`);
-    console.log(`Timestamp: ${new Date().toISOString()}`);
-    console.log(`Request Body:`, JSON.stringify(req.body, null, 2));
+    console.log(`Full Request Body:`, JSON.stringify(req.body, null, 2));
     console.log(`${'='.repeat(60)}\n`);
 
     // ✅ LOAD BUSINESS DATA
@@ -1426,48 +1425,76 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 
     const { adminToken, shopDomain } = business;
     
-    // ✅ EXTRACT MESSAGE DATA - HANDLE MULTIPLE FORMATS
-    let message = null;
-    let visitor = null;
+    // ✅ EXTRACT MESSAGE - HANDLE ALL POSSIBLE FORMATS
+    let messageText = null;
+    let visitor = {};
     let operation = "message";
 
-    // Format 1: Direct message object (most common)
-    if (req.body.message && req.body.message.text) {
-      message = req.body.message;
+    console.log(`\n🔍 Parsing message from SalesIQ...`);
+
+    // Try multiple ways to get the message
+    if (req.body?.message?.text) {
+      messageText = req.body.message.text;
       visitor = req.body.visitor || {};
       operation = req.body.operation || "message";
-    }
-    // Format 2: Message in different structure
-    else if (req.body.text) {
-      message = { text: req.body.text };
+      console.log(`✅ Format 1: Direct message.text found`);
+    } 
+    else if (req.body?.text) {
+      messageText = req.body.text;
       visitor = req.body.visitor || {};
-    }
-    // Format 3: Session data
-    else if (req.body.session) {
-      message = { text: req.body.session.message || req.body.session.text || "" };
+      console.log(`✅ Format 2: Root level text found`);
+    } 
+    else if (req.body?.session?.message) {
+      messageText = req.body.session.message;
       visitor = req.body.session.visitor || {};
+      console.log(`✅ Format 3: Session message found`);
     }
+    else if (req.body?.data?.message) {
+      messageText = req.body.data.message;
+      visitor = req.body.data.visitor || {};
+      console.log(`✅ Format 4: Data wrapper found`);
+    }
+    else if (req.body?.payload?.message) {
+      messageText = req.body.payload.message;
+      visitor = req.body.payload.visitor || {};
+      console.log(`✅ Format 5: Payload wrapper found`);
+    }
+    // Last resort - check if there's ANY text property
     else {
-      console.error(`❌ No message found in request body`);
-      console.error(`Available keys:`, Object.keys(req.body));
+      for (const [key, value] of Object.entries(req.body)) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          messageText = value;
+          console.log(`✅ Format 6: Found text in key: ${key}`);
+          break;
+        }
+        if (typeof value === 'object' && value?.text) {
+          messageText = value.text;
+          console.log(`✅ Format 7: Found text in nested object: ${key}`);
+          break;
+        }
+      }
+    }
+
+    // If still no message, return error with debugging info
+    if (!messageText || messageText.trim() === '') {
+      console.error(`❌ No message text found in any format`);
+      console.error(`Request keys:`, Object.keys(req.body));
+      console.error(`Full body:`, JSON.stringify(req.body, null, 2));
+      
       return res.json({
         action: "reply",
-        replies: ["I couldn't understand your message. Please try again."]
+        replies: [
+          "I couldn't understand your message. Please try again.",
+          "Try saying: 'show me deals', 'track order', 'add to cart', 'buy now', or 'return order'"
+        ],
+        suggestions: ["Browse Deals", "Track Order", "Help"]
       });
     }
 
-    if (!message || !message.text) {
-      console.error(`❌ Message text is empty`);
-      return res.json({
-        action: "reply",
-        replies: ["Please send a message."]
-      });
-    }
+    console.log(`📝 Message extracted: "${messageText}"`);
+    console.log(`👤 Visitor data:`, visitor);
 
-    console.log(`📝 Message received: "${message.text}"`);
-    console.log(`👤 Visitor:`, visitor);
-
-    const userId = visitor?.email || visitor?.id || visitor?.name || "anonymous";
+    const userId = visitor?.email || visitor?.id || visitor?.name || `user_${Date.now()}`;
     console.log(`🆔 User ID: ${userId}`);
 
     // ✅ GET OR CREATE CONVERSATION MEMORY
@@ -1477,50 +1504,53 @@ app.post("/api/zobot/:businessId", async (req, res) => {
       console.log(`✨ New conversation session created`);
     }
     const memory = userSessions.get(memoryKey);
-    console.log(`💾 Memory sessions for this business: ${Array.from(userSessions.keys()).filter(k => k.startsWith(businessId)).length}`);
+    const activeSessions = Array.from(userSessions.keys()).filter(k => k.startsWith(businessId)).length;
+    console.log(`💾 Active sessions for this business: ${activeSessions}`);
 
     // ✅ DETECT INTENT
     console.log(`\n🧠 INTENT DETECTION`);
-    const { intent, confidence } = await detectIntent(message.text);
-    console.log(`Intent: ${intent}`);
-    console.log(`Confidence: ${(confidence * 100).toFixed(1)}%`);
+    const { intent, confidence } = await detectIntent(messageText);
+    console.log(`   Intent: ${intent}`);
+    console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);
     
-    memory.addMessage('user', message.text, { intent });
+    memory.addMessage('user', messageText, { intent });
 
     // ✅ GET CONTEXT FROM MEMORY
     const context = memory.getContext();
     console.log(`\n📋 CONTEXT`);
-    console.log(`Email in context: ${context.email || 'Not set'}`);
-    console.log(`Previous actions: ${context.previousActions.length}`);
+    console.log(`   Email: ${context.email || 'Not set'}`);
+    console.log(`   Previous actions: ${context.previousActions.length}`);
 
-    // ✅ EXECUTE ACTION USING BUSINESS-SPECIFIC DATA
+    // ✅ EXECUTE ACTION
     console.log(`\n⚙️ EXECUTING ACTION`);
-    console.log(`Shop Domain: ${shopDomain}`);
+    console.log(`   Shop: ${shopDomain}`);
+    console.log(`   Intent: ${intent}`);
     
     const actionResult = await executeAction(
       intent,
-      message.text,
+      messageText,
       context,
       shopDomain,
       adminToken
     );
 
-    console.log(`Action Result:`, JSON.stringify(actionResult, null, 2));
+    console.log(`   ✅ Action completed`);
 
     // ✅ BUILD SALESIQ RESPONSE
     const response = buildSalesIQResponse(actionResult);
-    console.log(`\n📤 SALESIQ RESPONSE`);
-    console.log(`Response:`, JSON.stringify(response, null, 2));
+    console.log(`\n📤 RESPONSE`);
+    console.log(`   Action: ${response.action}`);
+    console.log(`   Message: ${response.replies?.[0]?.substring(0, 50)}...`);
     
     // ✅ REMEMBER FOR NEXT INTERACTION
     memory.addMessage('bot', actionResult.message);
     
     if (actionResult.remember) {
       memory.remember(intent, actionResult.data);
-      console.log(`💾 Saved to memory:`, actionResult.data);
+      console.log(`   💾 Data saved to memory`);
     }
 
-    console.log(`\n✅ Response sent for intent: ${intent}`);
+    console.log(`\n✅ Response sent successfully`);
     console.log(`${'='.repeat(60)}\n`);
     
     res.json(response);
@@ -1528,169 +1558,31 @@ app.post("/api/zobot/:businessId", async (req, res) => {
   } catch (error) {
     console.error(`\n${'='.repeat(60)}`);
     console.error(`❌ ZOBOT WEBHOOK ERROR`);
-    console.error(`Error Message: ${error.message}`);
-    console.error(`Stack Trace:`, error.stack);
+    console.error(`Error: ${error.message}`);
+    console.error(`Line: ${error.stack.split('\n')[1]}`);
     console.error(`${'='.repeat(60)}\n`);
     
-    res.json({
+    res.status(500).json({
       action: "reply",
       replies: [
-        `⚠️ Error: ${error.message}\n\nPlease try again or contact support.`,
-        "Available commands: Browse Deals, Track Order, Add to Cart, Buy Now, Return Order"
+        `⚠️ Sorry, an error occurred: ${error.message}`,
+        "Please try again or contact support."
       ],
-      suggestions: ["Help", "Browse Deals", "Track Order"]
+      suggestions: ["Help", "Browse Deals", "Try Again"]
     });
   }
 });
 
 // =====================================================
-// WEBHOOK TEST ENDPOINT (For manual testing)
+// GRACEFUL SHUTDOWN (FIXED)
 // =====================================================
 
-app.post("/api/zobot/:businessId/test", async (req, res) => {
-  try {
-    const { businessId } = req.params;
-    
-    // Simulate SalesIQ webhook payload
-    const testPayload = {
-      message: {
-        text: req.body.text || "show me deals"
-      },
-      visitor: {
-        email: req.body.email || "test@example.com",
-        id: "test-visitor-123",
-        name: "Test User"
-      },
-      operation: "message"
-    };
-
-    console.log(`\n🧪 TEST WEBHOOK CALLED`);
-    console.log(`Business ID: ${businessId}`);
-    console.log(`Test Payload:`, JSON.stringify(testPayload, null, 2));
-
-    // Call the webhook handler
-    const mockReq = {
-      body: testPayload,
-      params: { businessId }
-    };
-
-    const mockRes = {
-      json: (data) => {
-        console.log(`Test Response:`, JSON.stringify(data, null, 2));
-        return data;
-      }
-    };
-
-    // Handle the request
-    await new Promise((resolve) => {
-      const originalJson = mockRes.json;
-      mockRes.json = function(data) {
-        res.json(data);
-        resolve();
-      };
-
-      // Simulate the webhook call
-      const testReq = {
-        body: testPayload,
-        params: { businessId }
-      };
-
-      // Create a handler and call it
-      const handler = async (req, res) => {
-        const { businessId } = req.params;
-        const business = await getBusinessData(businessId);
-        
-        if (!business) {
-          return res.json({ action: "reply", replies: ["Business not found"] });
-        }
-
-        const { adminToken, shopDomain } = business;
-        const message = req.body.message;
-        const visitor = req.body.visitor || {};
-        const userId = visitor.email || visitor.id || "test";
-        
-        const memoryKey = `${businessId}_${userId}`;
-        if (!userSessions.has(memoryKey)) {
-          userSessions.set(memoryKey, new ConversationMemory(userId));
-        }
-        const memory = userSessions.get(memoryKey);
-        
-        const { intent } = await detectIntent(message.text);
-        memory.addMessage('user', message.text, { intent });
-        
-        const context = memory.getContext();
-        const actionResult = await executeAction(intent, message.text, context, shopDomain, adminToken);
-        const response = buildSalesIQResponse(actionResult);
-        
-        memory.addMessage('bot', actionResult.message);
-        
-        res.json(response);
-      };
-
-      handler(testReq, res);
-    });
-
-  } catch (error) {
-    console.error(`❌ Test webhook error:`, error);
-    res.status(500).json({
-      error: error.message,
-      type: "test_error"
-    });
-  }
-});
-// =====================================================
-// ERROR HANDLER
-// =====================================================
-
-app.use((err, req, res, next) => {
-    console.error("❌ Unhandled error:", err);
-    res.status(500).json({
-        error: "Internal server error",
-        message: err.message,
-        timestamp: new Date().toISOString()
-    });
-});
-
-// =====================================================
-// 404 HANDLER
-// =====================================================
-
-app.use((req, res) => {
-    res.status(404).json({
-        error: "Not found",
-        path: req.path,
-        method: req.method,
-        availableEndpoints: {
-            auth: [
-                "GET /api/shopify/auth/start?shop=example.myshopify.com",
-                "GET /api/shopify/auth/callback"
-            ],
-            webhooks: [
-                "POST /api/zobot/:businessId"
-            ],
-            business: [
-                "GET /api/business/:businessId"
-            ],
-            health: [
-                "GET /health",
-                "GET /api/shopify/config-check"
-            ],
-            debug: [
-                "GET /api/debug/businesses",
-                "GET /api/debug/sessions/:businessId"
-            ]
-        }
-    });
-});
-
-// =====================================================
-// START SERVER
-// =====================================================
+let server = null;
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-    console.log(`
+server = app.listen(PORT, () => {
+  console.log(`
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
 ║     🤖 SELF-DRIVING STORE BOT - BACKEND STARTED 🤖       ║
@@ -1743,54 +1635,65 @@ app.listen(PORT, () => {
 ╚════════════════════════════════════════════════════════════╝
   `);
 
-    console.log('🚀 Ready to accept connections...');
-    console.log(`
-📝 Test the server:
-`);
-    console.log(`   Health: curl ${BASE_URL}/health`);
-    console.log(`   Config: curl ${BASE_URL}/api/shopify/config-check`);
-    console.log(`   Businesses: curl ${BASE_URL}/api/debug/businesses
-`);
+  console.log('🚀 Ready to accept connections...\n');
 });
 
-// =====================================================
-// GRACEFUL SHUTDOWN
-// =====================================================
-
+// Graceful shutdown - properly handle server close
 process.on('SIGTERM', () => {
-    console.log('📴 SIGTERM signal received: closing HTTP server');
-    app.close(() => {
-        console.log('✅ HTTP server closed');
-        console.log(`📊 Final Stats:
-   Businesses: ${businessDatabase.size}
-   Sessions: ${userSessions.size}`);
-        process.exit(0);
+  console.log('\n📴 SIGTERM signal received: closing HTTP server...');
+  
+  if (server) {
+    server.close(() => {
+      console.log('✅ HTTP server closed');
+      console.log(`📊 Final Stats:`);
+      console.log(`   Connected Stores: ${businessDatabase.size}`);
+      console.log(`   Active Sessions: ${userSessions.size}`);
+      process.exit(0);
     });
+
+    // Force close after 10 seconds
+    setTimeout(() => {
+      console.error('❌ Server did not close gracefully, forcing exit');
+      process.exit(1);
+    }, 10000);
+  } else {
+    process.exit(0);
+  }
 });
 
 process.on('SIGINT', () => {
-    console.log('📴 SIGINT signal received: closing HTTP server');
-    app.close(() => {
-        console.log('✅ HTTP server closed');
-        console.log(`📊 Final Stats:
-   Businesses: ${businessDatabase.size}
-   Sessions: ${userSessions.size}`);
-        process.exit(0);
+  console.log('\n📴 SIGINT signal received: closing HTTP server...');
+  
+  if (server) {
+    server.close(() => {
+      console.log('✅ HTTP server closed');
+      console.log(`📊 Final Stats:`);
+      console.log(`   Connected Stores: ${businessDatabase.size}`);
+      console.log(`   Active Sessions: ${userSessions.size}`);
+      process.exit(0);
     });
+
+    // Force close after 10 seconds
+    setTimeout(() => {
+      console.error('❌ Server did not close gracefully, forcing exit');
+      process.exit(1);
+    }, 10000);
+  } else {
+    process.exit(0);
+  }
 });
 
-// =====================================================
-// UNCAUGHT EXCEPTION HANDLER
-// =====================================================
-
+// Uncaught exceptions
 process.on('uncaughtException', (error) => {
-    console.error('❌ Uncaught Exception:', error);
-    process.exit(1);
+  console.error('❌ Uncaught Exception:');
+  console.error(error);
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-    process.exit(1);
+  console.error('❌ Unhandled Rejection at:', promise);
+  console.error('Reason:', reason);
+  process.exit(1);
 });
 
-console.log('✅ Server initialization complete!');
+console.log('✅ Server initialization complete!\n');

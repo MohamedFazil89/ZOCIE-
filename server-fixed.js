@@ -166,6 +166,53 @@ async function getBusinessIdByShop(shopDomain) {
 // SHOPIFY API HELPER - FIXED
 // =====================================================
 
+// =====================================================
+// SIMILARITY CALCULATION FOR PRODUCT MATCHING
+// =====================================================
+
+function calculateSimilarity(str1, str2) {
+  const longer = str1.length > str2.length ? str1 : str2;
+  const shorter = str1.length > str2.length ? str2 : str1;
+  
+  if (longer.length === 0) return 1.0;
+  
+  // Check if shorter string is contained in longer
+  if (longer.includes(shorter)) return 0.9;
+  
+  // Calculate Levenshtein distance
+  const editDistance = levenshteinDistance(str1, str2);
+  return (longer.length - editDistance) / longer.length;
+}
+
+function levenshteinDistance(str1, str2) {
+  const matrix = [];
+  
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i];
+  }
+  
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j;
+  }
+  
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  
+  return matrix[str2.length][str1.length];
+}
+
+
 async function shopifyApiCall(shopDomain, adminToken, endpoint, method = "GET", body = null) {
   if (!shopDomain || !adminToken) {
     console.error('❌ Missing shopDomain or adminToken');
@@ -218,11 +265,11 @@ async function detectIntent(userMessage) {
       confidence: 0.9
     },
     add_cart: {
-      patterns: /add.*cart|add to cart|add this|want to buy|interested/,
+      patterns: /add.*cart|add to cart|add this|add|buy|purchase|want to buy|interested|get me|i want|cart/,
       confidence: 0.9
     },
     buy_now: {
-      patterns: /buy now|checkout|payment|purchase|price|cost|how much/,
+      patterns: /buy now|checkout|payment|complete purchase|pay now/,
       confidence: 0.85
     },
     return_order: {
@@ -351,61 +398,224 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
     }
 
     case 'add_cart': {
-      let email = context.email;
+  let email = context.email;
+  
+  // Extract email from message if not in context
+  if (!email) {
+    const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
+    if (emailMatch) {
+      email = emailMatch[0];
+      memory.remember('email', email);
+      await memory.saveToFile();
+      console.log(`📧 Extracted and saved email: ${email}`);
+    }
+  }
+
+  if (!email) {
+    return {
+      needsInfo: true,
+      fieldNeeded: "email",
+      question: "📧 I need your email to add items to your cart",
+      inputType: "email"
+    };
+  }
+
+  // 🆕 EXTRACT PRODUCT INFO FROM MESSAGE
+  let variantId = null;
+  let productName = null;
+  let quantity = 1;
+
+  // Check for variant_id in message
+  const variantMatch = userMessage.match(/\b(\d{11,})\b/); // Shopify variant IDs are long numbers
+  if (variantMatch) {
+    variantId = variantMatch[1];
+    console.log(`🔍 Found variant ID: ${variantId}`);
+  }
+
+  // Extract quantity (e.g., "2x", "2 of", "quantity 2")
+  const quantityMatch = userMessage.match(/(\d+)\s*(x|of|quantity|pcs)/i);
+  if (quantityMatch) {
+    quantity = parseInt(quantityMatch[1]);
+    console.log(`🔢 Quantity: ${quantity}`);
+  }
+
+  // If no variant ID, try to find product by name
+  if (!variantId) {
+    // Extract product name from message
+    // Remove common words and get the product name
+    const cleanMessage = userMessage
+      .toLowerCase()
+      .replace(/add to cart|add|cart|buy|purchase|i want|get me/gi, '')
+      .trim();
+    
+    if (cleanMessage.length > 2) {
+      productName = cleanMessage;
+      console.log(`🔍 Searching for product: "${productName}"`);
       
-      if (!email) {
-        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
-        if (emailMatch) {
-          email = emailMatch[0];
-          memory.remember('email', email);
-          await memory.saveToFile();
-          console.log(`📧 Extracted and saved email: ${email}`);
-        }
-      }
-
-      if (!email) {
-        return {
-          needsInfo: true,
-          fieldNeeded: "email",
-          question: "📧 I need your email to add items to your cart",
-          inputType: "email"
-        };
-      }
-
-      const draftBody = {
-        draft_order: {
-          email: email,
-          note: "Created via SalesIQ Bot"
-        }
-      };
-
-      const draftData = await shopifyCall(
-        `/draft_orders.json`,
-        "POST",
-        draftBody
+      // Search for product in Shopify
+      const searchData = await shopifyCall(
+        `/products.json?title=${encodeURIComponent(productName)}&limit=5`
       );
-
-      if (!draftData?.draft_order) {
-        return {
-          message: "⚠️ Could not add to cart. Please try again.",
-          suggestions: ["Try Again", "Browse Products"]
-        };
+      
+      if (searchData?.products && searchData.products.length > 0) {
+        // Find best match using fuzzy matching
+        let bestMatch = null;
+        let highestScore = 0;
+        
+        for (const product of searchData.products) {
+          const score = calculateSimilarity(productName.toLowerCase(), product.title.toLowerCase());
+          if (score > highestScore) {
+            highestScore = score;
+            bestMatch = product;
+          }
+        }
+        
+        if (bestMatch && bestMatch.variants?.[0]) {
+          variantId = bestMatch.variants[0].id.toString();
+          productName = bestMatch.title;
+          console.log(`✅ Found product: ${productName} (variant: ${variantId})`);
+        }
       }
+    }
+  }
 
-      return {
-        message: `✅ **Cart Created!**\n\nReady to add items?\nCheckout URL: ${draftData.draft_order.invoice_url}`,
-        remember: true,
-        data: { email, draftOrderId: draftData.draft_order.id },
-        buttons: [
+  // If still no variant ID, ask user to specify
+  if (!variantId) {
+    return {
+      message: "🛒 I'd love to add that to your cart!\n\nCould you tell me which product you want? You can:\n• Say the product name\n• Give me the product number\n• Browse deals and choose from there",
+      suggestions: ["Browse Deals", "Help"]
+    };
+  }
+
+  // 🆕 GET OR CREATE DRAFT ORDER
+  let draftOrderId = context.draftOrderId;
+  let draftOrder = null;
+
+  // Try to get existing draft order
+  if (draftOrderId) {
+    const existingDraft = await shopifyCall(`/draft_orders/${draftOrderId}.json`);
+    if (existingDraft?.draft_order) {
+      draftOrder = existingDraft.draft_order;
+      console.log(`✅ Found existing cart: ${draftOrderId}`);
+    }
+  }
+
+  // Create new draft order if none exists
+  if (!draftOrder) {
+    const draftBody = {
+      draft_order: {
+        email: email,
+        line_items: [
           {
-            label: "Go to Checkout",
-            type: "url",
-            value: draftData.draft_order.invoice_url
+            variant_id: parseInt(variantId),
+            quantity: quantity
           }
         ],
-        suggestions: ["Browse More", "View Cart"]
+        note: "Created via SalesIQ Bot"
+      }
+    };
+
+    const draftData = await shopifyCall(
+      `/draft_orders.json`,
+      "POST",
+      draftBody
+    );
+
+    if (!draftData?.draft_order) {
+      return {
+        message: "⚠️ Could not add to cart. Please try again.",
+        suggestions: ["Try Again", "Browse Products"]
       };
     }
+
+    draftOrder = draftData.draft_order;
+    draftOrderId = draftOrder.id;
+    
+    // Save draft order ID to memory
+    memory.remember('draftOrderId', draftOrderId);
+    await memory.saveToFile();
+    
+    console.log(`✅ Created new cart: ${draftOrderId}`);
+  } else {
+    // Update existing draft order with new item
+    const currentItems = draftOrder.line_items || [];
+    
+    // Check if item already exists in cart
+    const existingItem = currentItems.find(item => 
+      item.variant_id?.toString() === variantId.toString()
+    );
+    
+    if (existingItem) {
+      // Update quantity
+      existingItem.quantity += quantity;
+    } else {
+      // Add new item
+      currentItems.push({
+        variant_id: parseInt(variantId),
+        quantity: quantity
+      });
+    }
+    
+    const updateBody = {
+      draft_order: {
+        line_items: currentItems
+      }
+    };
+    
+    const updatedDraft = await shopifyCall(
+      `/draft_orders/${draftOrderId}.json`,
+      "PUT",
+      updateBody
+    );
+    
+    if (!updatedDraft?.draft_order) {
+      return {
+        message: "⚠️ Could not update cart. Please try again.",
+        suggestions: ["Try Again", "View Cart"]
+      };
+    }
+    
+    draftOrder = updatedDraft.draft_order;
+    console.log(`✅ Updated cart: ${draftOrderId}`);
+  }
+
+  // Build response message
+  const itemCount = draftOrder.line_items?.length || 0;
+  const totalPrice = draftOrder.total_price || "0.00";
+  const productTitle = productName || "Product";
+  
+  let message = `✅ **Added to Cart!**\n\n`;
+  message += `📦 ${quantity}x ${productTitle}\n\n`;
+  message += `🛒 **Your Cart:**\n`;
+  message += `Items: ${itemCount}\n`;
+  message += `Total: $${totalPrice}\n\n`;
+  message += `Ready to checkout?`;
+
+  return {
+    message: message,
+    remember: true,
+    data: { 
+      email, 
+      draftOrderId: draftOrder.id,
+      lastAddedVariant: variantId,
+      lastAddedProduct: productTitle
+    },
+    buttons: [
+      {
+        label: "🛍️ View Cart",
+        type: "url",
+        value: draftOrder.invoice_url
+      },
+      {
+        label: "💳 Checkout Now",
+        type: "url",
+        value: draftOrder.invoice_url
+      }
+    ],
+    suggestions: ["Browse More", "View Cart", "Checkout"]
+  };
+}
+
 
     case 'buy_now': {
       let email = context.email;

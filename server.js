@@ -3,6 +3,8 @@
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 
 const app = express();
 app.use(express.json());
@@ -19,6 +21,42 @@ app.use((req, res, next) => {
 });
 
 dotenv.config();
+
+
+const DATA_DIR = path.join(process.cwd(), "businesses");
+
+// Ensure folder exists
+function ensureDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+export async function saveBusinessData(data) {
+  try {
+    ensureDir();
+
+    // each business gets its own file
+    const filePath = path.join(DATA_DIR, `business_${data.businessId}.json`);
+
+    let existing = {};
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, "utf-8");
+      existing = JSON.parse(raw || "{}");
+    }
+
+    const updated = {
+      ...existing,
+      ...data
+    };
+
+    fs.writeFileSync(filePath, JSON.stringify(updated, null, 2));
+
+    return { success: true, message: "Saved locally." };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
 
 // ✅ FIX: Token storage (use database in production)
 const tokenStore = new Map(); // shop -> { accessToken, refreshToken, expiresAt }
@@ -121,7 +159,35 @@ app.get("/api/shopify/auth/start", (req, res) => {
   res.json({ authUrl, state });
 });
 
-// Step 2: OAuth Callback
+
+
+// =====================================================
+// BUSINESS DATABASE (Use real DB in production)
+// =====================================================
+const businessDatabase = new Map(); // businessId → business data
+const shopToBusinessMap = new Map(); // shop domain → businessId
+
+// Helper: Generate unique business ID
+function generateBusinessId() {
+  return 'biz_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+// Helper: Save business to database
+
+
+// Helper: Get business data by ID
+async function getBusinessData(businessId) {
+  return businessDatabase.get(businessId);
+}
+
+// Helper: Get business ID by shop domain
+async function getBusinessIdByShop(shopDomain) {
+  return shopToBusinessMap.get(shopDomain);
+}
+
+// =====================================================
+// UPDATED: OAuth Callback - Save Business Data
+// =====================================================
 app.get("/api/shopify/auth/callback", async (req, res) => {
   try {
     const { code, shop, state } = req.query;
@@ -177,63 +243,224 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
       throw new Error("Failed to get access token");
     }
 
-    // ✅ FIX: SAVE the token for this shop
-    activeStore = shop; // Update active store
-    tokenStore.set(shop, {
-      accessToken,
-      refreshToken: tokenData.refresh_token,
-      expiresAt: Date.now() + ((tokenData.expires_in || 3600) * 1000)
+    console.log('✅ Access token obtained successfully');
+
+    // ✅ FETCH SHOP DETAILS
+    const shopDetailsUrl = `https://${shop}/admin/api/2024-10/shop.json`;
+    const shopResponse = await fetch(shopDetailsUrl, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json"
+      }
     });
 
-    console.log('✅ Access token obtained and stored for:', shop);
+    let shopDetails = {};
+    if (shopResponse.ok) {
+      const shopData = await shopResponse.json();
+      shopDetails = {
+        shopName: shopData.shop?.name || shop,
+        shopEmail: shopData.shop?.email || "",
+        currency: shopData.shop?.currency || "USD",
+        timezone: shopData.shop?.iana_timezone || ""
+      };
+    }
 
-    // ✅ FIX: Return token to frontend properly
+    // ✅ GENERATE UNIQUE BUSINESS ID
+    const businessId = generateBusinessId();
+    console.log('🆔 Generated businessId:', businessId);
+
+    // ✅ SAVE BUSINESS DATA WITH TOKEN
+    const businessData = {
+      businessId: businessId,
+      shopDomain: shop,
+      shopName: shopDetails.shopName,
+      shopEmail: shopDetails.shopEmail,
+      adminToken: accessToken,
+      refreshToken: tokenData.refresh_token || null,
+      expiresAt: Date.now() + ((tokenData.expires_in || 3600) * 1000),
+      connectedAt: new Date().toISOString(),
+      status: "active",
+      currency: shopDetails.currency,
+      timezone: shopDetails.timezone,
+      webhookUrl: `${BASE_URL}/api/zobot/${businessId}`
+    };
+
+    await saveBusinessData(businessData);
+
+    // ✅ FETCH PRODUCT COUNT FOR DISPLAY
+    const productsUrl = `https://${shop}/admin/api/2024-10/products.json?limit=1&fields=id`;
+    let productCount = 0;
+    try {
+      const productsResponse = await fetch(productsUrl, {
+        headers: {
+          "X-Shopify-Access-Token": accessToken,
+          "Content-Type": "application/json"
+        }
+      });
+      if (productsResponse.ok) {
+        const productsData = await productsResponse.json();
+        productCount = productsData.products?.length || 0;
+      }
+    } catch (err) {
+      console.log('⚠️ Could not fetch product count:', err.message);
+    }
+
+    console.log('✅ Business successfully configured!');
+
+    // ✅ SUCCESS PAGE WITH WEBHOOK URL
     res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Connection Successful</title>
+        <title>Bot Configuration Ready!</title>
         <script src="https://cdn.tailwindcss.com"></script>
       </head>
-      <body class="bg-gradient-to-br from-green-50 to-blue-50 min-h-screen flex items-center justify-center">
-        <div class="bg-white rounded-2xl shadow-2xl p-12 text-center max-w-2xl">
-          <div class="text-6xl mb-6">✅</div>
-          <h1 class="text-4xl font-bold text-gray-800 mb-4">Store Connected!</h1>
-          <p class="text-xl text-gray-600 mb-8">Your Shopify store is now connected to SalesIQ</p>
+      <body class="bg-gradient-to-br from-green-50 to-blue-100 min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-2xl w-full">
           
-          <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
-            <p class="text-sm text-gray-700 mb-4"><strong>Store:</strong> ${shop}</p>
-            <p class="text-sm text-gray-700 mb-2"><strong>Token Status:</strong> ✅ Securely stored on server</p>
-            <p class="text-xs text-green-600 font-semibold">No need to save manually - we got it!</p>
+          <!-- Header -->
+          <div class="bg-gradient-to-r from-green-500 to-green-600 p-8 text-center">
+            <div class="text-6xl mb-4">✅</div>
+            <h1 class="text-4xl font-bold text-white mb-2">Bot is Ready!</h1>
+            <p class="text-green-100">Your store is connected and configured</p>
           </div>
 
-          <div class="space-y-4">
-            <h3 class="font-bold text-gray-800 mb-4">Your bot is ready! 🤖</h3>
-            <p class="text-gray-600">All features are now active:</p>
-            <ul class="text-left space-y-2 text-gray-700 text-sm">
-              <li>✅ Browse store deals</li>
-              <li>✅ Track orders</li>
-              <li>✅ Add to cart</li>
-              <li>✅ Buy now</li>
-              <li>✅ Process returns</li>
-            </ul>
+          <!-- Content -->
+          <div class="p-8">
+            
+            <!-- Store Info -->
+            <div class="bg-gray-50 rounded-lg p-6 mb-6">
+              <h3 class="text-xl font-bold text-gray-800 mb-4">📦 Store Information</h3>
+              <div class="space-y-3">
+                <div class="flex justify-between">
+                  <span class="text-gray-600">Store Name:</span>
+                  <span class="font-semibold text-gray-800">${shopDetails.shopName}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-600">Domain:</span>
+                  <span class="font-semibold text-gray-800">${shop}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-600">Status:</span>
+                  <span class="font-semibold text-green-600">✓ Active</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Features -->
+            <div class="mb-6">
+              <h3 class="text-xl font-bold text-gray-800 mb-4">🤖 Active Features</h3>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                  <span class="text-green-500 text-xl mr-2">✓</span>
+                  <span class="text-gray-700">Browse Deals</span>
+                </div>
+                <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                  <span class="text-green-500 text-xl mr-2">✓</span>
+                  <span class="text-gray-700">Track Orders</span>
+                </div>
+                <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                  <span class="text-green-500 text-xl mr-2">✓</span>
+                  <span class="text-gray-700">Add to Cart</span>
+                </div>
+                <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                  <span class="text-green-500 text-xl mr-2">✓</span>
+                  <span class="text-gray-700">Buy Now</span>
+                </div>
+                <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                  <span class="text-green-500 text-xl mr-2">✓</span>
+                  <span class="text-gray-700">Process Returns</span>
+                </div>
+                <div class="flex items-center p-3 bg-green-50 rounded-lg">
+                  <span class="text-green-500 text-xl mr-2">✓</span>
+                  <span class="text-gray-700">Memory Context</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Webhook Configuration -->
+            <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-6">
+              <h3 class="text-lg font-bold text-gray-800 mb-3">🔗 Webhook for SalesIQ</h3>
+              <p class="text-sm text-gray-600 mb-3">Copy this URL to your Zoho SalesIQ bot settings:</p>
+              
+              <div class="bg-white rounded p-4 mb-4 flex items-center justify-between">
+                de class="text-sm font-mono text-gray-800 break-all">${businessData.webhookUrl}</code>
+                <button 
+                  onclick="copyToClipboard('${businessData.webhookUrl}')"
+                  class="ml-3 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold whitespace-nowrap"
+                >
+                  Copy
+                </button>
+              </div>
+
+              <p class="text-xs text-blue-600">Business ID: de>${businessId}</code></p>
+            </div>
+
+            <!-- Setup Instructions -->
+            <div class="bg-orange-50 border border-orange-200 rounded-lg p-6 mb-6">
+              <h3 class="text-lg font-bold text-gray-800 mb-4">📋 Setup Instructions</h3>
+              <ol class="space-y-3 text-sm">
+                <li class="flex items-start">
+                  <span class="bg-orange-500 text-white rounded-full w-6 h-6 flex items-center justify-center mr-3 flex-shrink-0 text-xs font-bold">1</span>
+                  <span class="text-gray-700">Go to Zoho SalesIQ → Settings → Bot → Create New Bot</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="bg-orange-500 text-white rounded-full w-6 h-6 flex items-center justify-center mr-3 flex-shrink-0 text-xs font-bold">2</span>
+                  <span class="text-gray-700">Choose "Message Handler" → Select "Webhook"</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="bg-orange-500 text-white rounded-full w-6 h-6 flex items-center justify-center mr-3 flex-shrink-0 text-xs font-bold">3</span>
+                  <span class="text-gray-700">Paste the webhook URL above and click Save</span>
+                </li>
+                <li class="flex items-start">
+                  <span class="bg-orange-500 text-white rounded-full w-6 h-6 flex items-center justify-center mr-3 flex-shrink-0 text-xs font-bold">4</span>
+                  <span class="text-gray-700">Publish the bot and test with a message!</span>
+                </li>
+              </ol>
+            </div>
+
+            <!-- Action Button -->
+            <button 
+              onclick="handleDone()"
+              class="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white py-4 rounded-lg font-bold text-lg transition"
+            >
+              ✅ Done - Close This Window
+            </button>
           </div>
 
-          <button onclick="if(window.opener) { window.opener.postMessage({type:'oauth_success',shop:'${shop}',token:'${accessToken}'}, '*'); window.close(); } else { window.location.href='/'; }" 
-            class="mt-8 bg-blue-500 hover:bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold">
-            Done ✅
-          </button>
         </div>
 
         <script>
-          // Notify parent window if in popup
+          function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+              alert('✅ Webhook URL copied to clipboard!');
+            });
+          }
+
+          function handleDone() {
+            // Notify parent window if in popup
+            if (window.opener) {
+              window.opener.postMessage({
+                type: 'oauth_success',
+                shop: '${shop}',
+                businessId: '${businessId}',
+                webhookUrl: '${businessData.webhookUrl}'
+              }, '*');
+              window.close();
+            } else {
+              // If not in popup, redirect to home
+              window.location.href = '/';
+            }
+          }
+
+          // Auto-notify parent if in popup
           if (window.opener) {
             window.opener.postMessage({
               type: 'oauth_success',
               shop: '${shop}',
-              token: '${accessToken}'
+              businessId: '${businessId}',
+              webhookUrl: '${businessData.webhookUrl}'
             }, '*');
-            console.log('✅ OAuth success notified to parent');
           }
         </script>
       </body>
@@ -263,6 +490,9 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
     `);
   }
 });
+
+// =====================================================
+// NEW: Get Business Data Endpoint (
 
 // =====================================================
 // SHOPIFY API ROUTES

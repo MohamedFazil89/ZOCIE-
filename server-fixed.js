@@ -173,12 +173,12 @@ async function getBusinessIdByShop(shopDomain) {
 function calculateSimilarity(str1, str2) {
   const longer = str1.length > str2.length ? str1 : str2;
   const shorter = str1.length > str2.length ? str2 : str1;
-  
+
   if (longer.length === 0) return 1.0;
-  
+
   // Check if shorter string is contained in longer
   if (longer.includes(shorter)) return 0.9;
-  
+
   // Calculate Levenshtein distance
   const editDistance = levenshteinDistance(str1, str2);
   return (longer.length - editDistance) / longer.length;
@@ -186,15 +186,15 @@ function calculateSimilarity(str1, str2) {
 
 function levenshteinDistance(str1, str2) {
   const matrix = [];
-  
+
   for (let i = 0; i <= str2.length; i++) {
     matrix[i] = [i];
   }
-  
+
   for (let j = 0; j <= str1.length; j++) {
     matrix[0][j] = j;
   }
-  
+
   for (let i = 1; i <= str2.length; i++) {
     for (let j = 1; j <= str1.length; j++) {
       if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
@@ -208,7 +208,7 @@ function levenshteinDistance(str1, str2) {
       }
     }
   }
-  
+
   return matrix[str2.length][str1.length];
 }
 
@@ -312,7 +312,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
   switch (intent) {
     case 'track_order': {
       let email = context.email; // ✅ Check context first
-      
+
       // If no email in context, try to extract from message
       if (!email) {
         const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
@@ -363,7 +363,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
     case 'browse_deals': {
       const productsData = await shopifyCall(
-        `/products.json?limit=10&sort=created_at:desc`
+        `/products.json?limit=10&status=active`
       );
 
       if (!productsData?.products || productsData.products.length === 0) {
@@ -373,253 +373,289 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
         };
       }
 
-      const deals = productsData.products.slice(0, 5).map(p => {
-        const variant = p.variants?.[0];
-        const price = variant?.price || "N/A";
+      // 🆕 BUILD PRODUCT CARDS
+      const productCards = productsData.products.slice(0, 8).map(product => {
+        const variant = product.variants?.[0];
+        const price = variant?.price || "0.00";
         const comparePrice = variant?.compare_at_price;
+        const variantId = variant?.id || "";
+        const image = product.images?.[0]?.src || "https://via.placeholder.com/400x400?text=No+Image";
+        const productUrl = `https://${shopDomain}/products/${product.handle}`;
 
-        let priceText = `$${price}`;
+        // Calculate discount if applicable
+        let subtitle = `$${price}`;
+        let discount = null;
+
         if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
-          const discount = Math.round(
-            ((comparePrice - price) / comparePrice) * 100
-          );
-          priceText = `🔥 $${price} (Save ${discount}%)`;
+          discount = Math.round(((comparePrice - price) / comparePrice) * 100);
+          subtitle = `$${price} 🔥 Save ${discount}%`;
         }
 
-        return `• **${p.title}** - ${priceText}`;
-      }).join('\n');
+        return {
+          title: product.title,
+          subtitle: subtitle,
+          image: image,
+          buttons: [
+            {
+              label: "🛒 Add to Cart",
+              type: "text",
+              value: `add ${variantId} to cart`
+            },
+            {
+              label: "💳 Buy Now",
+              type: "url",
+              value: productUrl
+            },
+            {
+              label: "ℹ️ Details",
+              type: "url",
+              value: productUrl
+            }
+          ],
+          metadata: {
+            variant_id: variantId.toString(),
+            price: price,
+            product_handle: product.handle
+          }
+        };
+      });
 
       return {
-        message: `🛍️ **Today's Top Deals**\n\n${deals}`,
-        suggestions: ["Show More", "Add to Cart", "View Details"],
+        message: `🛍️ **Today's Top Deals**\n\nFound ${productCards.length} amazing products for you!`,
+        cards: productCards,  // 🆕 Return cards instead of text
+        suggestions: ["Add to Cart", "View More", "Track Order"],
         remember: true,
-        data: { productCount: productsData.products.length }
+        data: {
+          productCount: productsData.products.length,
+          lastBrowsed: new Date().toISOString()
+        }
       };
     }
+
 
     case 'add_cart': {
-  let email = context.email;
-  
-  // Extract email from message if not in context
-  if (!email) {
-    const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
-    if (emailMatch) {
-      email = emailMatch[0];
-      memory.remember('email', email);
-      await memory.saveToFile();
-      console.log(`📧 Extracted and saved email: ${email}`);
-    }
-  }
+      let email = context.email;
 
-  if (!email) {
-    return {
-      needsInfo: true,
-      fieldNeeded: "email",
-      question: "📧 I need your email to add items to your cart",
-      inputType: "email"
-    };
-  }
-
-  // 🆕 EXTRACT PRODUCT INFO FROM MESSAGE
-  let variantId = null;
-  let productName = null;
-  let quantity = 1;
-
-  // Check for variant_id in message
-  const variantMatch = userMessage.match(/\b(\d{11,})\b/); // Shopify variant IDs are long numbers
-  if (variantMatch) {
-    variantId = variantMatch[1];
-    console.log(`🔍 Found variant ID: ${variantId}`);
-  }
-
-  // Extract quantity (e.g., "2x", "2 of", "quantity 2")
-  const quantityMatch = userMessage.match(/(\d+)\s*(x|of|quantity|pcs)/i);
-  if (quantityMatch) {
-    quantity = parseInt(quantityMatch[1]);
-    console.log(`🔢 Quantity: ${quantity}`);
-  }
-
-  // If no variant ID, try to find product by name
-  if (!variantId) {
-    // Extract product name from message
-    // Remove common words and get the product name
-    const cleanMessage = userMessage
-      .toLowerCase()
-      .replace(/add to cart|add|cart|buy|purchase|i want|get me/gi, '')
-      .trim();
-    
-    if (cleanMessage.length > 2) {
-      productName = cleanMessage;
-      console.log(`🔍 Searching for product: "${productName}"`);
-      
-      // Search for product in Shopify
-      const searchData = await shopifyCall(
-        `/products.json?title=${encodeURIComponent(productName)}&limit=5`
-      );
-      
-      if (searchData?.products && searchData.products.length > 0) {
-        // Find best match using fuzzy matching
-        let bestMatch = null;
-        let highestScore = 0;
-        
-        for (const product of searchData.products) {
-          const score = calculateSimilarity(productName.toLowerCase(), product.title.toLowerCase());
-          if (score > highestScore) {
-            highestScore = score;
-            bestMatch = product;
-          }
-        }
-        
-        if (bestMatch && bestMatch.variants?.[0]) {
-          variantId = bestMatch.variants[0].id.toString();
-          productName = bestMatch.title;
-          console.log(`✅ Found product: ${productName} (variant: ${variantId})`);
+      // Extract email from message if not in context
+      if (!email) {
+        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
+        if (emailMatch) {
+          email = emailMatch[0];
+          memory.remember('email', email);
+          await memory.saveToFile();
+          console.log(`📧 Extracted and saved email: ${email}`);
         }
       }
-    }
-  }
 
-  // If still no variant ID, ask user to specify
-  if (!variantId) {
-    return {
-      message: "🛒 I'd love to add that to your cart!\n\nCould you tell me which product you want? You can:\n• Say the product name\n• Give me the product number\n• Browse deals and choose from there",
-      suggestions: ["Browse Deals", "Help"]
-    };
-  }
+      if (!email) {
+        return {
+          needsInfo: true,
+          fieldNeeded: "email",
+          question: "📧 I need your email to add items to your cart",
+          inputType: "email"
+        };
+      }
 
-  // 🆕 GET OR CREATE DRAFT ORDER
-  let draftOrderId = context.draftOrderId;
-  let draftOrder = null;
+      // 🆕 EXTRACT PRODUCT INFO FROM MESSAGE
+      let variantId = null;
+      let productName = null;
+      let quantity = 1;
 
-  // Try to get existing draft order
-  if (draftOrderId) {
-    const existingDraft = await shopifyCall(`/draft_orders/${draftOrderId}.json`);
-    if (existingDraft?.draft_order) {
-      draftOrder = existingDraft.draft_order;
-      console.log(`✅ Found existing cart: ${draftOrderId}`);
-    }
-  }
+      // Check for variant_id in message
+      const variantMatch = userMessage.match(/\b(\d{11,})\b/); // Shopify variant IDs are long numbers
+      if (variantMatch) {
+        variantId = variantMatch[1];
+        console.log(`🔍 Found variant ID: ${variantId}`);
+      }
 
-  // Create new draft order if none exists
-  if (!draftOrder) {
-    const draftBody = {
-      draft_order: {
-        email: email,
-        line_items: [
-          {
+      // Extract quantity (e.g., "2x", "2 of", "quantity 2")
+      const quantityMatch = userMessage.match(/(\d+)\s*(x|of|quantity|pcs)/i);
+      if (quantityMatch) {
+        quantity = parseInt(quantityMatch[1]);
+        console.log(`🔢 Quantity: ${quantity}`);
+      }
+
+      // If no variant ID, try to find product by name
+      if (!variantId) {
+        // Extract product name from message
+        // Remove common words and get the product name
+        const cleanMessage = userMessage
+          .toLowerCase()
+          .replace(/add to cart|add|cart|buy|purchase|i want|get me/gi, '')
+          .trim();
+
+        if (cleanMessage.length > 2) {
+          productName = cleanMessage;
+          console.log(`🔍 Searching for product: "${productName}"`);
+
+          // Search for product in Shopify
+          const searchData = await shopifyCall(
+            `/products.json?title=${encodeURIComponent(productName)}&limit=5`
+          );
+
+          if (searchData?.products && searchData.products.length > 0) {
+            // Find best match using fuzzy matching
+            let bestMatch = null;
+            let highestScore = 0;
+
+            for (const product of searchData.products) {
+              const score = calculateSimilarity(productName.toLowerCase(), product.title.toLowerCase());
+              if (score > highestScore) {
+                highestScore = score;
+                bestMatch = product;
+              }
+            }
+
+            if (bestMatch && bestMatch.variants?.[0]) {
+              variantId = bestMatch.variants[0].id.toString();
+              productName = bestMatch.title;
+              console.log(`✅ Found product: ${productName} (variant: ${variantId})`);
+            }
+          }
+        }
+      }
+
+      // If still no variant ID, ask user to specify
+      if (!variantId) {
+        return {
+          message: "🛒 I'd love to add that to your cart!\n\nCould you tell me which product you want? You can:\n• Say the product name\n• Give me the product number\n• Browse deals and choose from there",
+          suggestions: ["Browse Deals", "Help"]
+        };
+      }
+
+      // 🆕 GET OR CREATE DRAFT ORDER
+      let draftOrderId = context.draftOrderId;
+      let draftOrder = null;
+
+      // Try to get existing draft order
+      if (draftOrderId) {
+        const existingDraft = await shopifyCall(`/draft_orders/${draftOrderId}.json`);
+        if (existingDraft?.draft_order) {
+          draftOrder = existingDraft.draft_order;
+          console.log(`✅ Found existing cart: ${draftOrderId}`);
+        }
+      }
+
+      // Create new draft order if none exists
+      if (!draftOrder) {
+        const draftBody = {
+          draft_order: {
+            email: email,
+            line_items: [
+              {
+                variant_id: parseInt(variantId),
+                quantity: quantity
+              }
+            ],
+            note: "Created via SalesIQ Bot"
+          }
+        };
+
+        const draftData = await shopifyCall(
+          `/draft_orders.json`,
+          "POST",
+          draftBody
+        );
+
+        if (!draftData?.draft_order) {
+          return {
+            message: "⚠️ Could not add to cart. Please try again.",
+            suggestions: ["Try Again", "Browse Products"]
+          };
+        }
+
+        draftOrder = draftData.draft_order;
+        draftOrderId = draftOrder.id;
+
+        // Save draft order ID to memory
+        memory.remember('draftOrderId', draftOrderId);
+        await memory.saveToFile();
+
+        console.log(`✅ Created new cart: ${draftOrderId}`);
+      } else {
+        // Update existing draft order with new item
+        const currentItems = draftOrder.line_items || [];
+
+        // Check if item already exists in cart
+        const existingItem = currentItems.find(item =>
+          item.variant_id?.toString() === variantId.toString()
+        );
+
+        if (existingItem) {
+          // Update quantity
+          existingItem.quantity += quantity;
+        } else {
+          // Add new item
+          currentItems.push({
             variant_id: parseInt(variantId),
             quantity: quantity
+          });
+        }
+
+        const updateBody = {
+          draft_order: {
+            line_items: currentItems
+          }
+        };
+
+        const updatedDraft = await shopifyCall(
+          `/draft_orders/${draftOrderId}.json`,
+          "PUT",
+          updateBody
+        );
+
+        if (!updatedDraft?.draft_order) {
+          return {
+            message: "⚠️ Could not update cart. Please try again.",
+            suggestions: ["Try Again", "View Cart"]
+          };
+        }
+
+        draftOrder = updatedDraft.draft_order;
+        console.log(`✅ Updated cart: ${draftOrderId}`);
+      }
+
+      // Build response message
+      const itemCount = draftOrder.line_items?.length || 0;
+      const totalPrice = draftOrder.total_price || "0.00";
+      const productTitle = productName || "Product";
+
+      let message = `✅ **Added to Cart!**\n\n`;
+      message += `📦 ${quantity}x ${productTitle}\n\n`;
+      message += `🛒 **Your Cart:**\n`;
+      message += `Items: ${itemCount}\n`;
+      message += `Total: $${totalPrice}\n\n`;
+      message += `Ready to checkout?`;
+
+      return {
+        message: message,
+        remember: true,
+        data: {
+          email,
+          draftOrderId: draftOrder.id,
+          lastAddedVariant: variantId,
+          lastAddedProduct: productTitle
+        },
+        buttons: [
+          {
+            label: "🛍️ View Cart",
+            type: "url",
+            value: draftOrder.invoice_url
+          },
+          {
+            label: "💳 Checkout Now",
+            type: "url",
+            value: draftOrder.invoice_url
           }
         ],
-        note: "Created via SalesIQ Bot"
-      }
-    };
-
-    const draftData = await shopifyCall(
-      `/draft_orders.json`,
-      "POST",
-      draftBody
-    );
-
-    if (!draftData?.draft_order) {
-      return {
-        message: "⚠️ Could not add to cart. Please try again.",
-        suggestions: ["Try Again", "Browse Products"]
+        suggestions: ["Browse More", "View Cart", "Checkout"]
       };
     }
-
-    draftOrder = draftData.draft_order;
-    draftOrderId = draftOrder.id;
-    
-    // Save draft order ID to memory
-    memory.remember('draftOrderId', draftOrderId);
-    await memory.saveToFile();
-    
-    console.log(`✅ Created new cart: ${draftOrderId}`);
-  } else {
-    // Update existing draft order with new item
-    const currentItems = draftOrder.line_items || [];
-    
-    // Check if item already exists in cart
-    const existingItem = currentItems.find(item => 
-      item.variant_id?.toString() === variantId.toString()
-    );
-    
-    if (existingItem) {
-      // Update quantity
-      existingItem.quantity += quantity;
-    } else {
-      // Add new item
-      currentItems.push({
-        variant_id: parseInt(variantId),
-        quantity: quantity
-      });
-    }
-    
-    const updateBody = {
-      draft_order: {
-        line_items: currentItems
-      }
-    };
-    
-    const updatedDraft = await shopifyCall(
-      `/draft_orders/${draftOrderId}.json`,
-      "PUT",
-      updateBody
-    );
-    
-    if (!updatedDraft?.draft_order) {
-      return {
-        message: "⚠️ Could not update cart. Please try again.",
-        suggestions: ["Try Again", "View Cart"]
-      };
-    }
-    
-    draftOrder = updatedDraft.draft_order;
-    console.log(`✅ Updated cart: ${draftOrderId}`);
-  }
-
-  // Build response message
-  const itemCount = draftOrder.line_items?.length || 0;
-  const totalPrice = draftOrder.total_price || "0.00";
-  const productTitle = productName || "Product";
-  
-  let message = `✅ **Added to Cart!**\n\n`;
-  message += `📦 ${quantity}x ${productTitle}\n\n`;
-  message += `🛒 **Your Cart:**\n`;
-  message += `Items: ${itemCount}\n`;
-  message += `Total: $${totalPrice}\n\n`;
-  message += `Ready to checkout?`;
-
-  return {
-    message: message,
-    remember: true,
-    data: { 
-      email, 
-      draftOrderId: draftOrder.id,
-      lastAddedVariant: variantId,
-      lastAddedProduct: productTitle
-    },
-    buttons: [
-      {
-        label: "🛍️ View Cart",
-        type: "url",
-        value: draftOrder.invoice_url
-      },
-      {
-        label: "💳 Checkout Now",
-        type: "url",
-        value: draftOrder.invoice_url
-      }
-    ],
-    suggestions: ["Browse More", "View Cart", "Checkout"]
-  };
-}
 
 
     case 'buy_now': {
       let email = context.email;
-      
+
       if (!email) {
         return {
           needsInfo: true,
@@ -637,7 +673,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
     case 'return_order': {
       let email = context.email;
-      
+
       if (!email) {
         return {
           needsInfo: true,
@@ -656,17 +692,17 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
     case 'general_query':
     default: {
       const userName = context.userName ? context.userName.split(' ')[0] : null;
-      const greeting = userName 
-        ? `Hi ${userName}! 👋` 
+      const greeting = userName
+        ? `Hi ${userName}! 👋`
         : `Hi! 👋`;
-      
+
       let message = greeting;
-      
+
       // Check if returning user
       if (context.email || context.previousActions?.length > 0) {
         message = `${greeting} Welcome back!`;
       }
-      
+
       message += ` How can I help you today?\n\n` +
         `💬 You can:\n` +
         `• 🛍️ Browse deals\n` +
@@ -674,7 +710,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
         `• 🛒 Add to cart\n` +
         `• 💳 Buy now\n` +
         `• 🔄 Return items`;
-      
+
       return {
         message: message,
         suggestions: ["Browse Deals", "Track Order", "Add to Cart", "Help"]
@@ -687,7 +723,10 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 // BUILD SALESIQ RESPONSE - FIXED
 // =====================================================
 
-// FIXED: Complete implementation with proper validation
+// =====================================================
+// BUILD SALESIQ RESPONSE - FIXED WITH CARDS SUPPORT
+// =====================================================
+
 function buildSalesIQResponse(actionResult) {
   const response = {};
 
@@ -719,6 +758,11 @@ function buildSalesIQResponse(actionResult) {
     response.action = "reply";
     response.replies = [actionResult.message || "No response"];
 
+    // 🆕 ADD CARDS IF AVAILABLE
+    if (actionResult.cards && actionResult.cards.length > 0) {
+      response.cards = actionResult.cards;
+    }
+
     if (actionResult.suggestions) {
       response.suggestions = actionResult.suggestions;
     }
@@ -730,6 +774,7 @@ function buildSalesIQResponse(actionResult) {
 
   return response;
 }
+
 
 // =====================================================
 // OAUTH ROUTES - FIXED
@@ -1016,7 +1061,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
       messageText = req.body.message.text;
       visitor = req.body.visitor || {};
       console.log(`✅ Format 1: Direct message.text found`);
-    } 
+    }
     else if (req.body?.text) {
       messageText = req.body.text;
       visitor = req.body.visitor || {};
@@ -1025,7 +1070,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 
     if (!messageText || messageText.trim() === '') {
       console.error(`❌ No message text found`);
-      
+
       return res.json({
         action: "reply",
         replies: [
@@ -1067,7 +1112,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 
     // ✅ GET CONTEXT FROM MEMORY
     const context = memory.getContext();
-    
+
     console.log(`\n📋 CONTEXT`);
     console.log(`   Email: ${context.email || 'Not set'}`);
     console.log(`   Name: ${context.userName || 'Not set'}`);

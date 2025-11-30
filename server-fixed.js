@@ -362,68 +362,77 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
     }
 
     case 'browse_deals': {
+      console.log('🛍️ Starting browse_deals action...');
+
       const productsData = await shopifyCall(
         `/products.json?limit=10&status=active`
       );
 
+      console.log('📦 Products API response:', productsData ? 'Success' : 'Failed');
+
       if (!productsData?.products || productsData.products.length === 0) {
+        console.log('❌ No products found');
         return {
           message: "🛍️ No products available right now. Check back soon!",
           suggestions: ["Help", "Track Order"]
         };
       }
 
-      // 🆕 BUILD PRODUCT CARDS
-      const productCards = productsData.products.slice(0, 8).map(product => {
+      console.log(`✅ Found ${productsData.products.length} products`);
+
+      // 🆕 BUILD CARDS - 2025 FORMAT
+      const cards = [];
+
+      for (let i = 0; i < Math.min(productsData.products.length, 8); i++) {
+        const product = productsData.products[i];
         const variant = product.variants?.[0];
-        const price = variant?.price || "0.00";
-        const comparePrice = variant?.compare_at_price;
-        const variantId = variant?.id || "";
-        const image = product.images?.[0]?.src || "https://via.placeholder.com/400x400?text=No+Image";
-        const productUrl = `https://${shopDomain}/products/${product.handle}`;
 
-        // Calculate discount if applicable
-        let subtitle = `$${price}`;
-        let discount = null;
-
-        if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
-          discount = Math.round(((comparePrice - price) / comparePrice) * 100);
-          subtitle = `$${price} 🔥 Save ${discount}%`;
+        if (!variant) {
+          console.log(`⚠️ Skipping product ${product.title} - no variant`);
+          continue;
         }
 
-        return {
+        const price = variant.price || "0.00";
+        const comparePrice = variant.compare_at_price;
+        const variantId = variant.id;
+        const image = product.images?.[0]?.src || "";
+
+        // Calculate discount
+        let priceDisplay = `$${price}`;
+        if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
+          const discount = Math.round(((parseFloat(comparePrice) - parseFloat(price)) / parseFloat(comparePrice)) * 100);
+          priceDisplay = `$${price} • Save ${discount}%`;
+        }
+
+        const card = {
           title: product.title,
-          subtitle: subtitle,
+          subtitle: priceDisplay,
           image: image,
           buttons: [
             {
               label: "🛒 Add to Cart",
-              type: "text",
-              value: `add ${variantId} to cart`
+              type: "invoke_function",
+              key: "add_to_cart",
+              value: variantId.toString()
             },
             {
-              label: "💳 Buy Now",
+              label: "View Details",
               type: "url",
-              value: productUrl
-            },
-            {
-              label: "ℹ️ Details",
-              type: "url",
-              value: productUrl
+              value: `https://${shopDomain}/products/${product.handle}`
             }
-          ],
-          metadata: {
-            variant_id: variantId.toString(),
-            price: price,
-            product_handle: product.handle
-          }
+          ]
         };
-      });
+
+        cards.push(card);
+        console.log(`✅ Added card: ${product.title}`);
+      }
+
+      console.log(`📦 Total cards created: ${cards.length}`);
 
       return {
-        message: `🛍️ **Today's Top Deals**\n\nFound ${productCards.length} amazing products for you!`,
-        cards: productCards,  // 🆕 Return cards instead of text
-        suggestions: ["Add to Cart", "View More", "Track Order"],
+        message: `🛍️ Today's Top Deals\n\nFound ${cards.length} amazing products for you!`,
+        cards: cards,
+        suggestions: ["Track Order", "Add to Cart", "Help"],
         remember: true,
         data: {
           productCount: productsData.products.length,
@@ -431,6 +440,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
         }
       };
     }
+
 
 
     case 'add_cart': {
@@ -726,11 +736,14 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 // =====================================================
 // BUILD SALESIQ RESPONSE - FIXED WITH CARDS SUPPORT
 // =====================================================
-
 function buildSalesIQResponse(actionResult) {
+  console.log('\n🔧 Building SalesIQ response...');
+  console.log('   Action result:', actionResult ? 'Present' : 'Missing');
+  
   const response = {};
 
   if (!actionResult) {
+    console.log('❌ No action result!');
     return {
       action: "reply",
       replies: ["An error occurred. Please try again."]
@@ -738,6 +751,7 @@ function buildSalesIQResponse(actionResult) {
   }
 
   if (actionResult.needsInfo) {
+    console.log('ℹ️ Building context request');
     response.action = "context";
     response.context_id = actionResult.fieldNeeded;
     response.questions = [
@@ -755,26 +769,38 @@ function buildSalesIQResponse(actionResult) {
       }
     ];
   } else {
+    console.log('💬 Building reply response');
     response.action = "reply";
     response.replies = [actionResult.message || "No response"];
 
-    // 🆕 ADD CARDS IF AVAILABLE
-    if (actionResult.cards && actionResult.cards.length > 0) {
+    // 🆕 ADD CARDS
+    if (actionResult.cards) {
+      console.log(`📦 Cards found: ${actionResult.cards.length}`);
+      console.log('📦 First card:', JSON.stringify(actionResult.cards[0], null, 2));
       response.cards = actionResult.cards;
+    } else {
+      console.log('⚠️ No cards in action result');
     }
 
+    // Add suggestions
     if (actionResult.suggestions) {
+      console.log(`💡 Adding ${actionResult.suggestions.length} suggestions`);
       response.suggestions = actionResult.suggestions;
     }
 
+    // Add buttons
     if (actionResult.buttons) {
+      console.log(`🔘 Adding ${actionResult.buttons.length} buttons`);
       response.buttons = actionResult.buttons;
     }
   }
 
+  console.log('\n📤 FINAL RESPONSE:');
+  console.log(JSON.stringify(response, null, 2));
+  console.log('─'.repeat(60));
+
   return response;
 }
-
 
 // =====================================================
 // OAUTH ROUTES - FIXED
@@ -1109,18 +1135,51 @@ app.post("/api/zobot/:businessId", async (req, res) => {
       await memory.saveToFile();
       console.log(`👤 Auto-saved visitor name: ${visitor.name}`);
     }
+// GET CONTEXT FROM MEMORY
+const context = memory.getContext();
 
-    // ✅ GET CONTEXT FROM MEMORY
-    const context = memory.getContext();
+console.log(`\n📋 CONTEXT`);
+console.log(`   Email: ${context.email || 'Not set'}`);
+console.log(`   Name: ${context.userName || 'Not set'}`);
+console.log(`   Previous actions: ${context.previousActions?.length || 0}`);
 
-    console.log(`\n📋 CONTEXT`);
-    console.log(`   Email: ${context.email || 'Not set'}`);
-    console.log(`   Name: ${context.userName || 'Not set'}`);
-    console.log(`   Previous actions: ${context.previousActions?.length || 0}`);
+// 🆕 ===== ADD THIS COMPLETE SECTION =====
+// 🆕 CHECK IF MESSAGE IS FROM CARD BUTTON CLICK
+console.log('\n🔘 Checking for button click...');
+console.log('Request body keys:', Object.keys(req.body));
 
-    // ✅ DETECT INTENT
-    console.log(`\n🧠 INTENT DETECTION`);
-    const { intent, confidence } = await detectIntent(messageText);
+if (req.body?.button_clicked) {
+  console.log('🔘 Button clicked detected!');
+  console.log('   Button data:', JSON.stringify(req.body.button_clicked, null, 2));
+  
+  // If it's add_to_cart button from product cards
+  if (req.body.button_clicked.key === 'add_to_cart') {
+    const variantId = req.body.button_clicked.value;
+    console.log(`🛒 Card button: Adding variant ${variantId} to cart`);
+    // Override message to trigger add_cart intent
+    messageText = `add ${variantId} to cart`;
+    console.log(`📝 Message overridden to: "${messageText}"`);
+  }
+} else if (req.body?.invoke_function) {
+  // Alternative format some SalesIQ versions use
+  console.log('🔘 Invoke function detected!');
+  console.log('   Function data:', JSON.stringify(req.body.invoke_function, null, 2));
+  
+  if (req.body.invoke_function.key === 'add_to_cart') {
+    const variantId = req.body.invoke_function.value;
+    console.log(`🛒 Function call: Adding variant ${variantId} to cart`);
+    messageText = `add ${variantId} to cart`;
+    console.log(`📝 Message overridden to: "${messageText}"`);
+  }
+} else {
+  console.log('ℹ️ No button click detected - regular message');
+}
+// 🆕 ===== END OF NEW SECTION =====
+
+// ✅ DETECT INTENT
+console.log(`\n🧠 INTENT DETECTION`);
+const { intent, confidence } = await detectIntent(messageText);
+
     console.log(`   Intent: ${intent}`);
     console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);
 

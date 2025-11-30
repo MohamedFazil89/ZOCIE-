@@ -6,7 +6,7 @@
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
-import persistence from './persistence.js';
+import persistence from './persistence';
 
 const app = express();
 app.use(express.json());
@@ -44,58 +44,61 @@ if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
 // DATABASES (Use real DB in production)
 // =====================================================
 
-let oauthStates = new Map(); // state → { shop, timestamp }
-let businessDatabase = new Map(); // businessId → business data
-let shopToBusinessMap = new Map(); // shop domain → businessId
-let userSessions = new Map(); // "businessId_userId" → conversation memory
+const oauthStates = new Map(); // state → { shop, timestamp }
+const businessDatabase = new Map(); // businessId → business data
+const shopToBusinessMap = new Map(); // shop domain → businessId
+const userSessions = new Map(); // "businessId_userId" → conversation memory
 
 // =====================================================
 // CONVERSATION MEMORY CLASS
 // =====================================================
 
-
-
 class ConversationMemory {
-  constructor(businessId, userId) {
-    this.businessId = businessId;
-    this.userId = userId;
-    this.messages = [];
-    this.context = {};
-  }
-
-  addMessage(role, content) {
-    this.messages.push({
-      role,
-      content,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  remember(key, value) {
-    this.context[key] = value;
-  }
-
-  recall(key) {
-    return this.context[key];
-  }
-
-  async saveToFile() {
-    await persistence.saveConversationMemory(this.businessId, this.userId, {
-      messages: this.messages,
-      context: this.context
-    });
-  }
-
-  static async loadFromFile(businessId, userId) {
-    const data = await persistence.loadConversationMemory(businessId, userId);
-    if (!data) {
-      return new ConversationMemory(businessId, userId);
+    constructor(userId) {
+        this.userId = userId;
+        this.history = [];
+        this.context = {
+            email: null,
+            previousActions: [],
+            preferences: {}
+        };
     }
-    const memory = new ConversationMemory(businessId, userId);
-    memory.messages = data.messages || [];
-    memory.context = data.context || {};
-    return memory;
-  }
+
+    addMessage(role, content, metadata = {}) {
+        this.history.push({
+            role,
+            content,
+            timestamp: Date.now(),
+            ...metadata
+        });
+    }
+
+    getContext() {
+        return this.context;
+    }
+
+    remember(key, value) {
+        this.context.previousActions.push({
+            key,
+            value,
+            timestamp: Date.now()
+        });
+
+        // Auto-extract email from text
+        if (typeof value === 'string') {
+            const emailMatch = value.match(/[\w\.-]+@[\w\.-]+/);
+            if (emailMatch) this.context.email = emailMatch[0];
+        }
+    }
+
+    extractEmail(text) {
+        const emailMatch = text.match(/[\w\.-]+@[\w\.-]+/);
+        if (emailMatch) {
+            this.context.email = emailMatch[0];
+            return emailMatch[0];
+        }
+        return null;
+    }
 }
 
 // =====================================================
@@ -106,12 +109,13 @@ function generateBusinessId() {
     return 'biz_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
-async function saveBusinessData(businessId, businessData) {
-  businessDatabase.set(businessId, businessData);
-  // Save to file as well
-  await persistence.saveBusinessData(businessId, businessData);
+async function saveBusinessData(businessData) {
+    const { businessId, shopDomain } = businessData;
+    businessDatabase.set(businessId, businessData);
+    shopToBusinessMap.set(shopDomain, businessId);
+    console.log(`✅ Saved business: ${businessId} for shop: ${shopDomain}`);
+    return businessId;
 }
-
 
 async function getBusinessData(businessId) {
     return businessDatabase.get(businessId);
@@ -1577,31 +1581,63 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 let server = null;
 
 const PORT = process.env.PORT || 3000;
-async function startServer() {
-  try {
-    // Initialize persistence and load data from files
-    await persistence.initializePersistence();
-    businessDatabase = await persistence.loadAllBusinesses();
-    
-    // Rebuild shop to business mapping
-    for (const [businessId, business] of businessDatabase) {
-      if (business.shop) {
-        shopToBusinessMap.set(business.shop, businessId);
-      }
-    }
-    
-    console.log(`✓ Loaded ${businessDatabase.size} businesses from persistence`);
-    
-    server = app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  } catch (error) {
-    console.error('Error starting server:', error);
-    process.exit(1);
-  }
-}
 
-startServer();
+server = app.listen(PORT, () => {
+  console.log(`
+╔════════════════════════════════════════════════════════════╗
+║                                                            ║
+║     🤖 SELF-DRIVING STORE BOT - BACKEND STARTED 🤖       ║
+║                                                            ║
+║  ✅ Multi-Tenant Shopify Integration                      ║
+║  ✅ AI-Powered Intent Detection                           ║
+║  ✅ Conversation Memory System                            ║
+║  ✅ Zoho SalesIQ Webhook Support                          ║
+║                                                            ║
+╠════════════════════════════════════════════════════════════╣
+║                                                            ║
+║  🌐 Server: http://localhost:${PORT}                      ║
+║  📍 Base URL: ${BASE_URL}                                 ║
+║  🏪 Connected Stores: ${businessDatabase.size}                            ║
+║  💬 Active Sessions: ${userSessions.size}                             ║
+║                                                            ║
+╠════════════════════════════════════════════════════════════╣
+║                                                            ║
+║  📌 Available Endpoints:                                   ║
+║                                                            ║
+║  OAuth:                                                    ║
+║    GET  /api/shopify/auth/start                           ║
+║    GET  /api/shopify/auth/callback                        ║
+║                                                            ║
+║  Webhooks:                                                 ║
+║    POST /api/zobot/:businessId                            ║
+║                                                            ║
+║  Business:                                                 ║
+║    GET  /api/business/:businessId                         ║
+║                                                            ║
+║  Health:                                                   ║
+║    GET  /health                                           ║
+║    GET  /api/shopify/config-check                         ║
+║                                                            ║
+║  Debug:                                                    ║
+║    GET  /api/debug/businesses                             ║
+║    GET  /api/debug/sessions/:businessId                   ║
+║                                                            ║
+╠════════════════════════════════════════════════════════════╣
+║                                                            ║
+║  ✨ Configuration Status:                                  ║
+║    SHOPIFY_API_KEY: ${SHOPIFY_API_KEY ? '✓ Set' : '❌ MISSING'}                       ║
+║    SHOPIFY_API_SECRET: ${SHOPIFY_API_SECRET ? '✓ Set' : '❌ MISSING'}                  ║
+║                                                            ║
+║  📊 System Metrics:                                        ║
+║    Memory Usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB                           ║
+║    Uptime: ${process.uptime().toFixed(2)}s                            ║
+║    Node Version: ${process.version}                         ║
+║                                                            ║
+╚════════════════════════════════════════════════════════════╝
+  `);
+
+  console.log('🚀 Ready to accept connections...\n');
+});
 
 // Graceful shutdown - properly handle server close
 process.on('SIGTERM', () => {

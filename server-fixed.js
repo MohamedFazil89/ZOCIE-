@@ -736,14 +736,13 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 // =====================================================
 // BUILD SALESIQ RESPONSE - FIXED WITH CARDS SUPPORT
 // =====================================================
+
 function buildSalesIQResponse(actionResult) {
   console.log('\n🔧 Building SalesIQ response...');
-  console.log('   Action result:', actionResult ? 'Present' : 'Missing');
   
   const response = {};
 
   if (!actionResult) {
-    console.log('❌ No action result!');
     return {
       action: "reply",
       replies: ["An error occurred. Please try again."]
@@ -751,7 +750,6 @@ function buildSalesIQResponse(actionResult) {
   }
 
   if (actionResult.needsInfo) {
-    console.log('ℹ️ Building context request');
     response.action = "context";
     response.context_id = actionResult.fieldNeeded;
     response.questions = [
@@ -760,45 +758,45 @@ function buildSalesIQResponse(actionResult) {
         replies: [actionResult.question],
         ...(actionResult.inputType && {
           input: {
-            type: actionResult.inputType,
-            ...(actionResult.inputType === "email" && {
-              validate: { format: "email" }
-            })
+            type: actionResult.inputType
           }
         })
       }
     ];
   } else {
-    console.log('💬 Building reply response');
     response.action = "reply";
     response.replies = [actionResult.message || "No response"];
 
-    // 🆕 ADD CARDS
-    if (actionResult.cards) {
-      console.log(`📦 Cards found: ${actionResult.cards.length}`);
-      console.log('📦 First card:', JSON.stringify(actionResult.cards[0], null, 2));
-      response.cards = actionResult.cards;
-    } else {
-      console.log('⚠️ No cards in action result');
+    // 🆕 ZOHO SALESIQ 2025 CARDS FORMAT
+    if (actionResult.cards && Array.isArray(actionResult.cards)) {
+      console.log(`📦 Processing ${actionResult.cards.length} cards for SalesIQ`);
+      
+      // Transform cards to SalesIQ format
+      response.cards = actionResult.cards.map(card => ({
+        title: card.title || "",
+        subtitle: card.subtitle || "",
+        image: card.image || "",
+        buttons: (card.buttons || []).map(btn => ({
+          label: btn.label || "Button",
+          type: btn.type || "text",
+          value: btn.value || "",
+          key: btn.key || ""
+        }))
+      }));
+      
+      console.log(`✅ Transformed ${response.cards.length} cards`);
     }
 
-    // Add suggestions
     if (actionResult.suggestions) {
-      console.log(`💡 Adding ${actionResult.suggestions.length} suggestions`);
       response.suggestions = actionResult.suggestions;
     }
 
-    // Add buttons
     if (actionResult.buttons) {
-      console.log(`🔘 Adding ${actionResult.buttons.length} buttons`);
       response.buttons = actionResult.buttons;
     }
   }
 
-  console.log('\n📤 FINAL RESPONSE:');
-  console.log(JSON.stringify(response, null, 2));
-  console.log('─'.repeat(60));
-
+  console.log('📤 FINAL RESPONSE:', JSON.stringify(response, null, 2));
   return response;
 }
 
@@ -1135,50 +1133,50 @@ app.post("/api/zobot/:businessId", async (req, res) => {
       await memory.saveToFile();
       console.log(`👤 Auto-saved visitor name: ${visitor.name}`);
     }
-// GET CONTEXT FROM MEMORY
-const context = memory.getContext();
+    // GET CONTEXT FROM MEMORY
+    const context = memory.getContext();
 
-console.log(`\n📋 CONTEXT`);
-console.log(`   Email: ${context.email || 'Not set'}`);
-console.log(`   Name: ${context.userName || 'Not set'}`);
-console.log(`   Previous actions: ${context.previousActions?.length || 0}`);
+    console.log(`\n📋 CONTEXT`);
+    console.log(`   Email: ${context.email || 'Not set'}`);
+    console.log(`   Name: ${context.userName || 'Not set'}`);
+    console.log(`   Previous actions: ${context.previousActions?.length || 0}`);
 
-// 🆕 ===== ADD THIS COMPLETE SECTION =====
-// 🆕 CHECK IF MESSAGE IS FROM CARD BUTTON CLICK
-console.log('\n🔘 Checking for button click...');
-console.log('Request body keys:', Object.keys(req.body));
+    // 🆕 ===== ADD THIS COMPLETE SECTION =====
+    // 🆕 CHECK IF MESSAGE IS FROM CARD BUTTON CLICK
+    console.log('\n🔘 Checking for button click...');
+    console.log('Request body keys:', Object.keys(req.body));
 
-if (req.body?.button_clicked) {
-  console.log('🔘 Button clicked detected!');
-  console.log('   Button data:', JSON.stringify(req.body.button_clicked, null, 2));
-  
-  // If it's add_to_cart button from product cards
-  if (req.body.button_clicked.key === 'add_to_cart') {
-    const variantId = req.body.button_clicked.value;
-    console.log(`🛒 Card button: Adding variant ${variantId} to cart`);
-    // Override message to trigger add_cart intent
-    messageText = `add ${variantId} to cart`;
-    console.log(`📝 Message overridden to: "${messageText}"`);
-  }
-} else if (req.body?.invoke_function) {
-  // Alternative format some SalesIQ versions use
-  console.log('🔘 Invoke function detected!');
-  console.log('   Function data:', JSON.stringify(req.body.invoke_function, null, 2));
-  
-  if (req.body.invoke_function.key === 'add_to_cart') {
-    const variantId = req.body.invoke_function.value;
-    console.log(`🛒 Function call: Adding variant ${variantId} to cart`);
-    messageText = `add ${variantId} to cart`;
-    console.log(`📝 Message overridden to: "${messageText}"`);
-  }
-} else {
-  console.log('ℹ️ No button click detected - regular message');
-}
-// 🆕 ===== END OF NEW SECTION =====
+    if (req.body?.button_clicked) {
+      console.log('🔘 Button clicked detected!');
+      console.log('   Button data:', JSON.stringify(req.body.button_clicked, null, 2));
 
-// ✅ DETECT INTENT
-console.log(`\n🧠 INTENT DETECTION`);
-const { intent, confidence } = await detectIntent(messageText);
+      // If it's add_to_cart button from product cards
+      if (req.body.button_clicked.key === 'add_to_cart') {
+        const variantId = req.body.button_clicked.value;
+        console.log(`🛒 Card button: Adding variant ${variantId} to cart`);
+        // Override message to trigger add_cart intent
+        messageText = `add ${variantId} to cart`;
+        console.log(`📝 Message overridden to: "${messageText}"`);
+      }
+    } else if (req.body?.invoke_function) {
+      // Alternative format some SalesIQ versions use
+      console.log('🔘 Invoke function detected!');
+      console.log('   Function data:', JSON.stringify(req.body.invoke_function, null, 2));
+
+      if (req.body.invoke_function.key === 'add_to_cart') {
+        const variantId = req.body.invoke_function.value;
+        console.log(`🛒 Function call: Adding variant ${variantId} to cart`);
+        messageText = `add ${variantId} to cart`;
+        console.log(`📝 Message overridden to: "${messageText}"`);
+      }
+    } else {
+      console.log('ℹ️ No button click detected - regular message');
+    }
+    // 🆕 ===== END OF NEW SECTION =====
+
+    // ✅ DETECT INTENT
+    console.log(`\n🧠 INTENT DETECTION`);
+    const { intent, confidence } = await detectIntent(messageText);
 
     console.log(`   Intent: ${intent}`);
     console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);

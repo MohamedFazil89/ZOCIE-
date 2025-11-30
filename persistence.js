@@ -6,7 +6,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
-
+import supabase from "./supabase.js";
 // Fix for ES modules (since __dirname doesn't exist)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

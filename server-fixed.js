@@ -13,13 +13,13 @@ app.use(express.json());
 
 // CORS
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    next();
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
 });
 
 dotenv.config();
@@ -35,9 +35,9 @@ const BASE_URL = "https://zocie.onrender.com";
 
 // Validate env vars
 if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
-    console.error('❌ MISSING REQUIRED ENV VARS:');
-    console.error('   SHOPIFY_API_KEY:', SHOPIFY_API_KEY ? '✓' : '❌ MISSING');
-    console.error('   SHOPIFY_API_SECRET:', SHOPIFY_API_SECRET ? '✓' : '❌ MISSING');
+  console.error('❌ MISSING REQUIRED ENV VARS:');
+  console.error('   SHOPIFY_API_KEY:', SHOPIFY_API_KEY ? '✓' : '❌ MISSING');
+  console.error('   SHOPIFY_API_SECRET:', SHOPIFY_API_SECRET ? '✓' : '❌ MISSING');
 }
 
 // =====================================================
@@ -120,7 +120,7 @@ class ConversationMemory {
 // =====================================================
 
 function generateBusinessId() {
-    return 'biz_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  return 'biz_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
 // FIXED: Made truly async and persists to file
@@ -137,20 +137,20 @@ async function saveBusinessData(businessData) {
 
 // FIXED: Made async and loads from file if not in memory
 async function getBusinessData(businessId) {
-    let business = businessDatabase.get(businessId);
-    
-    if (!business) {
-      business = await persistence.loadBusinessData(businessId);
-      if (business) {
-        businessDatabase.set(businessId, business);
-      }
+  let business = businessDatabase.get(businessId);
+
+  if (!business) {
+    business = await persistence.loadBusinessData(businessId);
+    if (business) {
+      businessDatabase.set(businessId, business);
     }
-    
-    return business || null;
+  }
+
+  return business || null;
 }
 
 async function getBusinessIdByShop(shopDomain) {
-    return shopToBusinessMap.get(shopDomain);
+  return shopToBusinessMap.get(shopDomain);
 }
 
 // =====================================================
@@ -158,37 +158,37 @@ async function getBusinessIdByShop(shopDomain) {
 // =====================================================
 
 async function shopifyApiCall(shopDomain, adminToken, endpoint, method = "GET", body = null) {
-    if (!shopDomain || !adminToken) {
-      console.error('❌ Missing shopDomain or adminToken');
+  if (!shopDomain || !adminToken) {
+    console.error('❌ Missing shopDomain or adminToken');
+    return null;
+  }
+
+  const url = `https://${shopDomain}/admin/api/${API_VERSION}${endpoint}`;
+  const options = {
+    method,
+    headers: {
+      "X-Shopify-Access-Token": adminToken,
+      "Content-Type": "application/json"
+    }
+  };
+
+  if (body) {
+    options.body = JSON.stringify(body);
+  }
+
+  try {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ Shopify API error: ${response.status} ${response.statusText}`);
+      console.error(`   Details: ${errorText}`);
       return null;
     }
-
-    const url = `https://${shopDomain}/admin/api/${API_VERSION}${endpoint}`;
-    const options = {
-        method,
-        headers: {
-            "X-Shopify-Access-Token": adminToken,
-            "Content-Type": "application/json"
-        }
-    };
-
-    if (body) {
-        options.body = JSON.stringify(body);
-    }
-
-    try {
-        const response = await fetch(url, options);
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ Shopify API error: ${response.status} ${response.statusText}`);
-            console.error(`   Details: ${errorText}`);
-            return null;
-        }
-        return await response.json();
-    } catch (error) {
-        console.error(`❌ Shopify API call failed: ${error.message}`);
-        return null;
-    }
+    return await response.json();
+  } catch (error) {
+    console.error(`❌ Shopify API call failed: ${error.message}`);
+    return null;
+  }
 }
 
 // =====================================================
@@ -197,42 +197,42 @@ async function shopifyApiCall(shopDomain, adminToken, endpoint, method = "GET", 
 
 // FIXED: Returns object with intent AND confidence
 async function detectIntent(userMessage) {
-    const msg = userMessage.toLowerCase().trim();
+  const msg = userMessage.toLowerCase().trim();
 
-    const intents = {
-        track_order: {
-            patterns: /track|status|where|delivery|order|shipping/,
-            confidence: 0.95
-        },
-        browse_deals: {
-            patterns: /deal|product|browse|show|what.*sell|what.*have|catalog|collection/,
-            confidence: 0.9
-        },
-        add_cart: {
-            patterns: /add.*cart|add to cart|add this|want to buy|interested/,
-            confidence: 0.9
-        },
-        buy_now: {
-            patterns: /buy now|checkout|payment|purchase|price|cost|how much/,
-            confidence: 0.85
-        },
-        return_order: {
-            patterns: /return|refund|money back|cancel|issue|wrong|damaged|not good/,
-            confidence: 0.9
-        },
-        product_info: {
-            patterns: /tell|about|info|details|describe|specifications|spec/,
-            confidence: 0.8
-        }
-    };
-
-    for (const [intent, { patterns, confidence }] of Object.entries(intents)) {
-        if (patterns.test(msg)) {
-            return { intent, confidence };
-        }
+  const intents = {
+    track_order: {
+      patterns: /track|status|where|delivery|order|shipping/,
+      confidence: 0.95
+    },
+    browse_deals: {
+      patterns: /deal|product|browse|show|what.*sell|what.*have|catalog|collection/,
+      confidence: 0.9
+    },
+    add_cart: {
+      patterns: /add.*cart|add to cart|add this|want to buy|interested/,
+      confidence: 0.9
+    },
+    buy_now: {
+      patterns: /buy now|checkout|payment|purchase|price|cost|how much/,
+      confidence: 0.85
+    },
+    return_order: {
+      patterns: /return|refund|money back|cancel|issue|wrong|damaged|not good/,
+      confidence: 0.9
+    },
+    product_info: {
+      patterns: /tell|about|info|details|describe|specifications|spec/,
+      confidence: 0.8
     }
+  };
 
-    return { intent: "general_query", confidence: 0.5 };
+  for (const [intent, { patterns, confidence }] of Object.entries(intents)) {
+    if (patterns.test(msg)) {
+      return { intent, confidence };
+    }
+  }
+
+  return { intent: "general_query", confidence: 0.5 };
 }
 
 // =====================================================
@@ -240,192 +240,193 @@ async function detectIntent(userMessage) {
 // =====================================================
 
 // FIXED: Made truly async, all shopifyCall operations awaited
+
 async function executeAction(intent, userMessage, context, shopDomain, adminToken) {
-    if (!shopDomain || !adminToken) {
-      console.error('❌ Missing shop or token');
-      return { message: "Configuration error. Please reconnect.", suggestions: ["Help"] };
+  if (!shopDomain || !adminToken) {
+    console.error('❌ Missing shop or token');
+    return { message: "Configuration error. Please reconnect.", suggestions: ["Help"] };
+  }
+
+  const shopifyCall = (endpoint, method = "GET", body = null) =>
+    shopifyApiCall(shopDomain, adminToken, endpoint, method, body);
+
+  switch (intent) {
+    case 'track_order': {
+      let email = context.email;
+
+      if (!email) {
+        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+/);
+        if (emailMatch) {
+          email = emailMatch[0];
+        }
+      }
+
+      if (!email) {
+        return {
+          needsInfo: true,
+          fieldNeeded: "email",
+          question: "📧 What's your email to find your order?",
+          inputType: "email"
+        };
+      }
+
+      const ordersData = await shopifyCall(
+        `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=1`
+      );
+
+      if (!ordersData?.orders || ordersData.orders.length === 0) {
+        return {
+          message: `No orders found for ${email}. Please check your email address.`,
+          suggestions: ["Browse Products", "Help"]
+        };
+      }
+
+      const order = ordersData.orders[0];
+      return {
+        message: `📦 **Order #${order.name}**\nStatus: ${order.fulfillment_status || 'Pending'}\nTotal: ${order.total_price} ${order.currency}\nPlaced: ${new Date(order.created_at).toLocaleDateString()}`,
+        remember: true,
+        data: { email, orderId: order.id },
+        buttons: [
+          {
+            label: "Track Shipment",
+            type: "url",
+            value: order.order_status_url
+          }
+        ],
+        suggestions: ["View Details", "Return Order", "Browse Products"]
+      };
     }
 
-    const shopifyCall = (endpoint, method = "GET", body = null) =>
-        shopifyApiCall(shopDomain, adminToken, endpoint, method, body);
+    case 'browse_deals': {
+      const productsData = await shopifyCall(
+        `/products.json?limit=10&sort=created_at:desc`
+      );
 
-    switch (intent) {
-        case 'track_order': {
-            let email = context.email;
+      if (!productsData?.products || productsData.products.length === 0) {
+        return {
+          message: "🛍️ No products available right now.",
+          suggestions: ["Check Back Later"]
+        };
+      }
 
-            if (!email) {
-                const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+/);
-                if (emailMatch) {
-                    email = emailMatch[0];
-                }
-            }
+      const deals = productsData.products.slice(0, 5).map(p => {
+        const variant = p.variants?.[0];
+        const price = variant?.price || "N/A";
+        const comparePrice = variant?.compare_at_price;
 
-            if (!email) {
-                return {
-                    needsInfo: true,
-                    fieldNeeded: "email",
-                    question: "📧 What's your email to find your order?",
-                    inputType: "email"
-                };
-            }
-
-            const ordersData = await shopifyCall(
-                `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=1`
-            );
-
-            if (!ordersData?.orders || ordersData.orders.length === 0) {
-                return {
-                    message: `No orders found for ${email}. Please check your email address.`,
-                    suggestions: ["Browse Products", "Help"]
-                };
-            }
-
-            const order = ordersData.orders[0];
-            return {
-                message: `📦 **Order #${order.name}**\nStatus: ${order.fulfillment_status || 'Pending'}\nTotal: ${order.total_price} ${order.currency}\nPlaced: ${new Date(order.created_at).toLocaleDateString()}`,
-                remember: true,
-                data: { email, orderId: order.id },
-                buttons: [
-                    {
-                        label: "Track Shipment",
-                        type: "url",
-                        value: order.order_status_url
-                    }
-                ],
-                suggestions: ["View Details", "Return Order", "Browse Products"]
-            };
+        let priceText = `$${price}`;
+        if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
+          const discount = Math.round(
+            ((comparePrice - price) / comparePrice) * 100
+          );
+          priceText = `🔥 $${price} (Save ${discount}%)`;
         }
 
-        case 'browse_deals': {
-            const productsData = await shopifyCall(
-                `/products.json?limit=10&sort=created_at:desc`
-            );
+        return `• **${p.title}** - ${priceText}`;
+      }).join('\n');
 
-            if (!productsData?.products || productsData.products.length === 0) {
-                return {
-                    message: "🛍️ No products available right now.",
-                    suggestions: ["Check Back Later"]
-                };
-            }
-
-            const deals = productsData.products.slice(0, 5).map(p => {
-                const variant = p.variants?.[0];
-                const price = variant?.price || "N/A";
-                const comparePrice = variant?.compare_at_price;
-
-                let priceText = `$${price}`;
-                if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
-                    const discount = Math.round(
-                        ((comparePrice - price) / comparePrice) * 100
-                    );
-                    priceText = `🔥 $${price} (Save ${discount}%)`;
-                }
-
-                return `• **${p.title}** - ${priceText}`;
-            }).join('\n');
-
-            return {
-                message: `🛍️ **Today's Top Deals**\n\n${deals}`,
-                suggestions: ["Show More", "Add to Cart", "View Details"],
-                remember: true,
-                data: { productCount: productsData.products.length }
-            };
-        }
-
-        case 'add_cart': {
-            let email = context.email;
-            if (!email) {
-                const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+/);
-                if (emailMatch) {
-                    email = emailMatch[0];
-                }
-            }
-
-            if (!email) {
-                return {
-                    needsInfo: true,
-                    fieldNeeded: "email",
-                    question: "📧 I need your email to add items to your cart",
-                    inputType: "email"
-                };
-            }
-
-            const draftBody = {
-                draft_order: {
-                    email: email,
-                    note: "Created via SalesIQ Bot"
-                }
-            };
-
-            const draftData = await shopifyCall(
-                `/draft_orders.json`,
-                "POST",
-                draftBody
-            );
-
-            if (!draftData?.draft_order) {
-                return {
-                    message: "⚠️ Could not add to cart. Please try again.",
-                    suggestions: ["Try Again", "Browse Products"]
-                };
-            }
-
-            return {
-                message: `✅ **Cart Created!**\n\nReady to add items?\nCheckout URL: ${draftData.draft_order.invoice_url}`,
-                remember: true,
-                data: { email, draftOrderId: draftData.draft_order.id },
-                buttons: [
-                    {
-                        label: "Go to Checkout",
-                        type: "url",
-                        value: draftData.draft_order.invoice_url
-                    }
-                ],
-                suggestions: ["Browse More", "View Cart"]
-            };
-        }
-
-        case 'buy_now': {
-            let email = context.email;
-            if (!email) {
-                return {
-                    needsInfo: true,
-                    fieldNeeded: "email",
-                    question: "📧 What's your email to complete the purchase?",
-                    inputType: "email"
-                };
-            }
-
-            return {
-                message: `💳 **Ready to Checkout!**\n\nPlease proceed to complete your purchase.\n\nClick the button below to go to our secure checkout.`,
-                suggestions: ["Browse More", "Help"]
-            };
-        }
-
-        case 'return_order': {
-            let email = context.email;
-            if (!email) {
-                return {
-                    needsInfo: true,
-                    fieldNeeded: "email",
-                    question: "📧 What's your email for the return?",
-                    inputType: "email"
-                };
-            }
-
-            return {
-                message: `🔄 **Return Process**\n\nWe'll help you process your return.\n\n1️⃣ Please describe the issue\n2️⃣ We'll verify your order\n3️⃣ Send return label\n4️⃣ Process refund\n\nWhat's the issue with your order?`,
-                suggestions: ["Damaged", "Wrong Item", "Not As Described", "Cancel"]
-            };
-        }
-
-        default: {
-            return {
-                message: `👋 Hi! How can I help you today?\n\n💬 You can:\n• 🛍️ Browse deals\n• 📦 Track orders\n• 🛒 Add to cart\n• 💳 Buy now\n• 🔄 Return items`,
-                suggestions: ["Browse Deals", "Track Order", "Add to Cart", "Help"]
-            };
-        }
+      return {
+        message: `🛍️ **Today's Top Deals**\n\n${deals}`,
+        suggestions: ["Show More", "Add to Cart", "View Details"],
+        remember: true,
+        data: { productCount: productsData.products.length }
+      };
     }
+
+    case 'add_cart': {
+      let email = context.email;
+      if (!email) {
+        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+/);
+        if (emailMatch) {
+          email = emailMatch[0];
+        }
+      }
+
+      if (!email) {
+        return {
+          needsInfo: true,
+          fieldNeeded: "email",
+          question: "📧 I need your email to add items to your cart",
+          inputType: "email"
+        };
+      }
+
+      const draftBody = {
+        draft_order: {
+          email: email,
+          note: "Created via SalesIQ Bot"
+        }
+      };
+
+      const draftData = await shopifyCall(
+        `/draft_orders.json`,
+        "POST",
+        draftBody
+      );
+
+      if (!draftData?.draft_order) {
+        return {
+          message: "⚠️ Could not add to cart. Please try again.",
+          suggestions: ["Try Again", "Browse Products"]
+        };
+      }
+
+      return {
+        message: `✅ **Cart Created!**\n\nReady to add items?\nCheckout URL: ${draftData.draft_order.invoice_url}`,
+        remember: true,
+        data: { email, draftOrderId: draftData.draft_order.id },
+        buttons: [
+          {
+            label: "Go to Checkout",
+            type: "url",
+            value: draftData.draft_order.invoice_url
+          }
+        ],
+        suggestions: ["Browse More", "View Cart"]
+      };
+    }
+
+    case 'buy_now': {
+      let email = context.email;
+      if (!email) {
+        return {
+          needsInfo: true,
+          fieldNeeded: "email",
+          question: "📧 What's your email to complete the purchase?",
+          inputType: "email"
+        };
+      }
+
+      return {
+        message: `💳 **Ready to Checkout!**\n\nPlease proceed to complete your purchase.\n\nClick the button below to go to our secure checkout.`,
+        suggestions: ["Browse More", "Help"]
+      };
+    }
+
+    case 'return_order': {
+      let email = context.email;
+      if (!email) {
+        return {
+          needsInfo: true,
+          fieldNeeded: "email",
+          question: "📧 What's your email for the return?",
+          inputType: "email"
+        };
+      }
+
+      return {
+        message: `🔄 **Return Process**\n\nWe'll help you process your return.\n\n1️⃣ Please describe the issue\n2️⃣ We'll verify your order\n3️⃣ Send return label\n4️⃣ Process refund\n\nWhat's the issue with your order?`,
+        suggestions: ["Damaged", "Wrong Item", "Not As Described", "Cancel"]
+      };
+    }
+
+    default: {
+      return {
+        message: `👋 Hi! How can I help you today?\n\n💬 You can:\n• 🛍️ Browse deals\n• 📦 Track orders\n• 🛒 Add to cart\n• 💳 Buy now\n• 🔄 Return items`,
+        suggestions: ["Browse Deals", "Track Order", "Add to Cart", "Help"]
+      };
+    }
+  }
 }
 
 // =====================================================
@@ -434,46 +435,46 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
 // FIXED: Complete implementation with proper validation
 function buildSalesIQResponse(actionResult) {
-    const response = {};
+  const response = {};
 
-    if (!actionResult) {
-      return {
-        action: "reply",
-        replies: ["An error occurred. Please try again."]
-      };
+  if (!actionResult) {
+    return {
+      action: "reply",
+      replies: ["An error occurred. Please try again."]
+    };
+  }
+
+  if (actionResult.needsInfo) {
+    response.action = "context";
+    response.context_id = actionResult.fieldNeeded;
+    response.questions = [
+      {
+        name: actionResult.fieldNeeded,
+        replies: [actionResult.question],
+        ...(actionResult.inputType && {
+          input: {
+            type: actionResult.inputType,
+            ...(actionResult.inputType === "email" && {
+              validate: { format: "email" }
+            })
+          }
+        })
+      }
+    ];
+  } else {
+    response.action = "reply";
+    response.replies = [actionResult.message || "No response"];
+
+    if (actionResult.suggestions) {
+      response.suggestions = actionResult.suggestions;
     }
 
-    if (actionResult.needsInfo) {
-        response.action = "context";
-        response.context_id = actionResult.fieldNeeded;
-        response.questions = [
-            {
-                name: actionResult.fieldNeeded,
-                replies: [actionResult.question],
-                ...(actionResult.inputType && {
-                    input: {
-                        type: actionResult.inputType,
-                        ...(actionResult.inputType === "email" && {
-                            validate: { format: "email" }
-                        })
-                    }
-                })
-            }
-        ];
-    } else {
-        response.action = "reply";
-        response.replies = [actionResult.message || "No response"];
-
-        if (actionResult.suggestions) {
-            response.suggestions = actionResult.suggestions;
-        }
-
-        if (actionResult.buttons) {
-            response.buttons = actionResult.buttons;
-        }
+    if (actionResult.buttons) {
+      response.buttons = actionResult.buttons;
     }
+  }
 
-    return response;
+  return response;
 }
 
 // =====================================================
@@ -481,150 +482,151 @@ function buildSalesIQResponse(actionResult) {
 // =====================================================
 
 app.get("/api/shopify/auth/start", (req, res) => {
-    const shop = req.query.shop;
+  const shop = req.query.shop;
 
-    if (!shop) {
-        return res.status(400).json({ error: "Shop parameter required" });
-    }
+  if (!shop) {
+    return res.status(400).json({ error: "Shop parameter required" });
+  }
 
-    if (!SHOPIFY_API_KEY) {
-        return res.status(500).json({
-            error: "Server configuration error: SHOPIFY_API_KEY not set"
-        });
-    }
+  if (!SHOPIFY_API_KEY) {
+    return res.status(500).json({
+      error: "Server configuration error: SHOPIFY_API_KEY not set"
+    });
+  }
 
-    const state = Math.random().toString(36).substring(2, 15) +
-        Math.random().toString(36).substring(2, 15);
+  const state = Math.random().toString(36).substring(2, 15) +
+    Math.random().toString(36).substring(2, 15);
 
-    oauthStates.set(state, { shop, timestamp: Date.now() });
+  oauthStates.set(state, { shop, timestamp: Date.now() });
 
-    const redirectUri = `${BASE_URL}/api/shopify/auth/callback`;
-    const authUrl = `https://${shop}/admin/oauth/authorize?` +
-        `client_id=${SHOPIFY_API_KEY}&` +
-        `scope=write_products,read_orders,write_orders,read_draft_orders,write_draft_orders&` +
-        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-        `state=${state}`;
+  const redirectUri = `${BASE_URL}/api/shopify/auth/callback`;
+  const authUrl = `https://${shop}/admin/oauth/authorize?` +
+  `client_id=${SHOPIFY_API_KEY}&` +
+  `scope=read_products,write_products,read_orders,write_orders,read_draft_orders,write_draft_orders,read_customers,write_customers&` +
+  `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+  `state=${state}`;
 
-    console.log('🔗 OAuth URL generated for shop:', shop);
-    res.json({ authUrl, state });
+
+  console.log('🔗 OAuth URL generated for shop:', shop);
+  res.json({ authUrl, state });
 });
 
 app.get("/api/shopify/auth/callback", async (req, res) => {
+  try {
+    // FIXED: Proper destructuring syntax
+    const { code, shop, state } = req.query;
+
+    console.log('📥 OAuth callback received:', { shop, hasCode: !!code, hasState: !!state });
+
+    if (!oauthStates.has(state)) {
+      console.error('❌ Invalid state parameter');
+      return res.status(403).send("Invalid state parameter - please try connecting again");
+    }
+
+    const stateData = oauthStates.get(state);
+
+    if (Date.now() - stateData.timestamp > 600000) {
+      oauthStates.delete(state);
+      console.error('❌ State expired');
+      return res.status(403).send("State expired - please try connecting again");
+    }
+
+    oauthStates.delete(state);
+
+    if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+      console.error('❌ Missing OAuth credentials');
+      return res.status(500).send("Server configuration error: OAuth credentials not configured");
+    }
+
+    const tokenUrl = `https://${shop}/admin/oauth/access_token`;
+    console.log('🔄 Exchanging code for token...');
+
+    const tokenResponse = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: SHOPIFY_API_KEY,
+        client_secret: SHOPIFY_API_SECRET,
+        code
+      })
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error('❌ Token exchange failed:', errorText);
+      throw new Error(`Token exchange failed: ${errorText}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+
+    if (!accessToken) {
+      throw new Error("Failed to get access token");
+    }
+
+    console.log('✅ Access token obtained successfully');
+
+    const shopDetailsUrl = `https://${shop}/admin/api/${API_VERSION}/shop.json`;
+    const shopResponse = await fetch(shopDetailsUrl, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json"
+      }
+    });
+
+    let shopDetails = {};
+    if (shopResponse.ok) {
+      const shopData = await shopResponse.json();
+      shopDetails = {
+        shopName: shopData.shop?.name || shop,
+        shopEmail: shopData.shop?.email || "",
+        currency: shopData.shop?.currency || "USD",
+        timezone: shopData.shop?.iana_timezone || ""
+      };
+    }
+
+    const businessId = generateBusinessId();
+    console.log('🆔 Generated businessId:', businessId);
+
+    // FIXED: Properly awaited save
+    const businessData = {
+      businessId: businessId,
+      shopDomain: shop,
+      shopName: shopDetails.shopName,
+      shopEmail: shopDetails.shopEmail,
+      adminToken: accessToken,
+      refreshToken: tokenData.refresh_token || null,
+      expiresAt: Date.now() + ((tokenData.expires_in || 3600) * 1000),
+      connectedAt: new Date().toISOString(),
+      status: "active",
+      currency: shopDetails.currency,
+      timezone: shopDetails.timezone,
+      webhookUrl: `${BASE_URL}/api/zobot/${businessId}`
+    };
+
+    await saveBusinessData(businessData);
+    shopToBusinessMap.set(shop, businessId);
+
+    const productsUrl = `https://${shop}/admin/api/${API_VERSION}/products.json?limit=1`;
+    let productCount = 0;
     try {
-        // FIXED: Proper destructuring syntax
-        const { code, shop, state } = req.query;
-
-        console.log('📥 OAuth callback received:', { shop, hasCode: !!code, hasState: !!state });
-
-        if (!oauthStates.has(state)) {
-            console.error('❌ Invalid state parameter');
-            return res.status(403).send("Invalid state parameter - please try connecting again");
+      const productsResponse = await fetch(productsUrl, {
+        headers: {
+          "X-Shopify-Access-Token": accessToken,
+          "Content-Type": "application/json"
         }
+      });
+      if (productsResponse.ok) {
+        const productsData = await productsResponse.json();
+        productCount = productsData.products?.length || 0;
+      }
+    } catch (err) {
+      console.log('⚠️ Could not fetch product count:', err.message);
+    }
 
-        const stateData = oauthStates.get(state);
+    console.log('✅ Business successfully configured!');
 
-        if (Date.now() - stateData.timestamp > 600000) {
-            oauthStates.delete(state);
-            console.error('❌ State expired');
-            return res.status(403).send("State expired - please try connecting again");
-        }
-
-        oauthStates.delete(state);
-
-        if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
-            console.error('❌ Missing OAuth credentials');
-            return res.status(500).send("Server configuration error: OAuth credentials not configured");
-        }
-
-        const tokenUrl = `https://${shop}/admin/oauth/access_token`;
-        console.log('🔄 Exchanging code for token...');
-
-        const tokenResponse = await fetch(tokenUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                client_id: SHOPIFY_API_KEY,
-                client_secret: SHOPIFY_API_SECRET,
-                code
-            })
-        });
-
-        if (!tokenResponse.ok) {
-            const errorText = await tokenResponse.text();
-            console.error('❌ Token exchange failed:', errorText);
-            throw new Error(`Token exchange failed: ${errorText}`);
-        }
-
-        const tokenData = await tokenResponse.json();
-        const accessToken = tokenData.access_token;
-
-        if (!accessToken) {
-            throw new Error("Failed to get access token");
-        }
-
-        console.log('✅ Access token obtained successfully');
-
-        const shopDetailsUrl = `https://${shop}/admin/api/${API_VERSION}/shop.json`;
-        const shopResponse = await fetch(shopDetailsUrl, {
-            headers: {
-                "X-Shopify-Access-Token": accessToken,
-                "Content-Type": "application/json"
-            }
-        });
-
-        let shopDetails = {};
-        if (shopResponse.ok) {
-            const shopData = await shopResponse.json();
-            shopDetails = {
-                shopName: shopData.shop?.name || shop,
-                shopEmail: shopData.shop?.email || "",
-                currency: shopData.shop?.currency || "USD",
-                timezone: shopData.shop?.iana_timezone || ""
-            };
-        }
-
-        const businessId = generateBusinessId();
-        console.log('🆔 Generated businessId:', businessId);
-
-        // FIXED: Properly awaited save
-        const businessData = {
-            businessId: businessId,
-            shopDomain: shop,
-            shopName: shopDetails.shopName,
-            shopEmail: shopDetails.shopEmail,
-            adminToken: accessToken,
-            refreshToken: tokenData.refresh_token || null,
-            expiresAt: Date.now() + ((tokenData.expires_in || 3600) * 1000),
-            connectedAt: new Date().toISOString(),
-            status: "active",
-            currency: shopDetails.currency,
-            timezone: shopDetails.timezone,
-            webhookUrl: `${BASE_URL}/api/zobot/${businessId}`
-        };
-
-        await saveBusinessData(businessData);
-        shopToBusinessMap.set(shop, businessId);
-
-        const productsUrl = `https://${shop}/admin/api/${API_VERSION}/products.json?limit=1`;
-        let productCount = 0;
-        try {
-            const productsResponse = await fetch(productsUrl, {
-                headers: {
-                    "X-Shopify-Access-Token": accessToken,
-                    "Content-Type": "application/json"
-                }
-            });
-            if (productsResponse.ok) {
-                const productsData = await productsResponse.json();
-                productCount = productsData.products?.length || 0;
-            }
-        } catch (err) {
-            console.log('⚠️ Could not fetch product count:', err.message);
-        }
-
-        console.log('✅ Business successfully configured!');
-
-        res.send(`
+    res.send(`
       <!DOCTYPE html>
       <html>
       <head>
@@ -697,9 +699,9 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
       </html>
     `);
 
-    } catch (error) {
-        console.error('❌ OAuth callback error:', error);
-        res.status(500).send(`
+  } catch (error) {
+    console.error('❌ OAuth callback error:', error);
+    res.status(500).send(`
       <!DOCTYPE html>
       <html>
       <head>
@@ -716,7 +718,7 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
       </body>
       </html>
     `);
-    }
+  }
 });
 
 console.log('✅ PART 1 LOADED - Setup through OAuth complete');
@@ -727,7 +729,7 @@ console.log('✅ PART 1 LOADED - Setup through OAuth complete');
 app.post("/api/zobot/:businessId", async (req, res) => {
   try {
     const { businessId } = req.params;
-    
+
     console.log(`\n${'='.repeat(60)}`);
     console.log(`📨 WEBHOOK REQUEST RECEIVED`);
     console.log(`Business ID: ${businessId}`);
@@ -735,7 +737,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 
     // ✅ LOAD BUSINESS DATA - FIXED: Now properly async
     const business = await getBusinessData(businessId);
-    
+
     if (!business) {
       console.error(`❌ Business not found: ${businessId}`);
       return res.json({
@@ -747,7 +749,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     console.log(`✅ Business found: ${business.shopName}`);
 
     const { adminToken, shopDomain } = business;
-    
+
     // ✅ EXTRACT MESSAGE - FIXED: Handle all possible formats
     let messageText = null;
     let visitor = {};
@@ -760,12 +762,12 @@ app.post("/api/zobot/:businessId", async (req, res) => {
       visitor = req.body.visitor || {};
       operation = req.body.operation || "message";
       console.log(`✅ Format 1: Direct message.text found`);
-    } 
+    }
     else if (req.body?.text) {
       messageText = req.body.text;
       visitor = req.body.visitor || {};
       console.log(`✅ Format 2: Root level text found`);
-    } 
+    }
     else if (req.body?.session?.message) {
       messageText = req.body.session.message;
       visitor = req.body.session.visitor || {};
@@ -799,7 +801,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     // FIXED: Proper validation
     if (!messageText || messageText.trim() === '') {
       console.error(`❌ No message text found`);
-      
+
       return res.json({
         action: "reply",
         replies: [
@@ -819,7 +821,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     // ✅ GET OR CREATE CONVERSATION MEMORY - FIXED
     const memoryKey = `${businessId}_${userId}`;
     let memory = userSessions.get(memoryKey);
-    
+
     if (!memory) {
       // Try loading from persistence
       memory = await ConversationMemory.loadFromFile(businessId, userId);
@@ -835,7 +837,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     const { intent, confidence } = await detectIntent(messageText);
     console.log(`   Intent: ${intent}`);
     console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);
-    
+
     // FIXED: Pass metadata with intent
     memory.addMessage('user', messageText, { intent });
 
@@ -849,7 +851,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     console.log(`\n⚙️ EXECUTING ACTION`);
     console.log(`   Shop: ${shopDomain}`);
     console.log(`   Intent: ${intent}`);
-    
+
     const actionResult = await executeAction(
       intent,
       messageText,
@@ -869,10 +871,10 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     console.log(`\n📤 RESPONSE`);
     console.log(`   Action: ${response.action}`);
     console.log(`   Replies: ${response.replies?.length || 0}`);
-    
+
     // ✅ REMEMBER FOR NEXT INTERACTION - FIXED
     memory.addMessage('bot', actionResult.message);
-    
+
     if (actionResult.remember && actionResult.data) {
       memory.remember(intent, actionResult.data);
       // FIXED: Save memory after interaction
@@ -882,7 +884,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 
     console.log(`\n✅ Response sent successfully`);
     console.log(`${'='.repeat(60)}\n`);
-    
+
     res.json(response);
 
   } catch (error) {
@@ -891,7 +893,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     console.error(`Error: ${error.message}`);
     console.error(`Stack: ${error.stack}`);
     console.error(`${'='.repeat(60)}\n`);
-    
+
     res.status(500).json({
       action: "reply",
       replies: [
@@ -908,39 +910,39 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 // =====================================================
 
 app.get("/api/business/:businessId", async (req, res) => {
-    try {
-        const { businessId } = req.params;
-        // FIXED: Now properly awaits
-        const business = await getBusinessData(businessId);
+  try {
+    const { businessId } = req.params;
+    // FIXED: Now properly awaits
+    const business = await getBusinessData(businessId);
 
-        if (!business) {
-            return res.status(404).json({ error: "Business not found" });
-        }
-
-        res.json({
-            businessId: business.businessId,
-            shopName: business.shopName,
-            shopDomain: business.shopDomain,
-            shopEmail: business.shopEmail,
-            currency: business.currency,
-            timezone: business.timezone,
-            status: business.status,
-            connectedAt: business.connectedAt,
-            webhookUrl: business.webhookUrl,
-            features: [
-                { name: "Browse Deals", enabled: true },
-                { name: "Track Orders", enabled: true },
-                { name: "Add to Cart", enabled: true },
-                { name: "Buy Now", enabled: true },
-                { name: "Process Returns", enabled: true },
-                { name: "Memory Context", enabled: true }
-            ]
-        });
-
-    } catch (error) {
-        console.error('❌ Error fetching business data:', error);
-        res.status(500).json({ error: error.message });
+    if (!business) {
+      return res.status(404).json({ error: "Business not found" });
     }
+
+    res.json({
+      businessId: business.businessId,
+      shopName: business.shopName,
+      shopDomain: business.shopDomain,
+      shopEmail: business.shopEmail,
+      currency: business.currency,
+      timezone: business.timezone,
+      status: business.status,
+      connectedAt: business.connectedAt,
+      webhookUrl: business.webhookUrl,
+      features: [
+        { name: "Browse Deals", enabled: true },
+        { name: "Track Orders", enabled: true },
+        { name: "Add to Cart", enabled: true },
+        { name: "Buy Now", enabled: true },
+        { name: "Process Returns", enabled: true },
+        { name: "Memory Context", enabled: true }
+      ]
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching business data:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // =====================================================
@@ -949,368 +951,369 @@ app.get("/api/business/:businessId", async (req, res) => {
 
 // Deals endpoint
 app.post("/salesiq-deals", async (req, res) => {
-    try {
-        const firstBusiness = Array.from(businessDatabase.values())[0];
+  try {
+    const firstBusiness = Array.from(businessDatabase.values())[0];
 
-        if (!firstBusiness) {
-            return res.json({
-                cards: [],
-                message: "No store connected. Please connect a Shopify store first."
-            });
-        }
-
-        // FIXED: Properly awaited
-        const data = await shopifyApiCall(
-            firstBusiness.shopDomain,
-            firstBusiness.adminToken,
-            "/products.json?limit=10&sort=created_at:desc"
-        );
-
-        const products = data?.products || [];
-
-        if (products.length === 0) {
-            return res.json({
-                cards: [],
-                message: "No deals available right now."
-            });
-        }
-
-        const cards = products.slice(0, 10).map(p => {
-            const v = p.variants?.[0];
-            const price = v?.price || "N/A";
-            const compare = v?.compare_at_price;
-            const img = p.images?.[0]?.src || "";
-            const productUrl = `https://${firstBusiness.shopDomain}/products/${p.handle}`;
-
-            let subtitle = `$${price}`;
-            if (compare && parseFloat(compare) > parseFloat(price)) {
-                const discount = Math.round(((compare - price) / compare) * 100);
-                subtitle = `🔥 $${price} (Save ${discount}%)`;
-            }
-
-            return {
-                title: p.title,
-                subtitle: subtitle,
-                image: img,
-                buttons: [
-                    {
-                        label: "View More",
-                        type: "url",
-                        value: productUrl
-                    },
-                    {
-                        label: "Add to Cart",
-                        type: "text",
-                        value: { variant_id: v?.id || "", price: price }
-                    }
-                ]
-            };
-        });
-
-        return res.json({
-            cards: cards,
-            message: "Deals fetched successfully"
-        });
-
-    } catch (err) {
-        console.error("Error fetching deals:", err);
-        return res.json({
-            cards: [],
-            message: "Failed to load deals."
-        });
+    if (!firstBusiness) {
+      return res.json({
+        cards: [],
+        message: "No store connected. Please connect a Shopify store first."
+      });
     }
+
+    // FIXED: Properly awaited
+    const data = await shopifyApiCall(
+      firstBusiness.shopDomain,
+      firstBusiness.adminToken,
+      "/products.json?limit=10&sort=created_at:desc"
+    );
+
+    const products = data?.products || [];
+
+    if (products.length === 0) {
+      return res.json({
+        cards: [],
+        message: "No deals available right now."
+      });
+    }
+
+    const cards = products.slice(0, 10).map(p => {
+      const v = p.variants?.[0];
+      const price = v?.price || "N/A";
+      const compare = v?.compare_at_price;
+      const img = p.images?.[0]?.src || "";
+      const productUrl = `https://${firstBusiness.shopDomain}/products/${p.handle}`;
+
+      let subtitle = `$${price}`;
+      if (compare && parseFloat(compare) > parseFloat(price)) {
+        const discount = Math.round(((compare - price) / compare) * 100);
+        subtitle = `🔥 $${price} (Save ${discount}%)`;
+      }
+
+      return {
+        title: p.title,
+        subtitle: subtitle,
+        image: img,
+        buttons: [
+          {
+            label: "View More",
+            type: "url",
+            value: productUrl
+          },
+          {
+            label: "Add to Cart",
+            type: "text",
+            value: { variant_id: v?.id || "", price: price }
+          }
+        ]
+      };
+    });
+
+    return res.json({
+      cards: cards,
+      message: "Deals fetched successfully"
+    });
+
+  } catch (err) {
+    console.error("Error fetching deals:", err);
+    return res.json({
+      cards: [],
+      message: "Failed to load deals."
+    });
+  }
 });
 
 // Track order endpoint
 app.post("/salesiq-track-order", async (req, res) => {
-    try {
-        const payload = req.body;
-        const email = payload.session?.email?.value || payload.email;
+  try {
+    const payload = req.body;
+    const email = payload.session?.email?.value || payload.email;
+    // const email = "nmohammedfazil790@gmail.com";
 
-        if (!email) {
-            return res.json({
-                action: "reply",
-                replies: ["Please provide your email address to track your order."]
-            });
-        }
-
-        const firstBusiness = Array.from(businessDatabase.values())[0];
-
-        if (!firstBusiness) {
-            return res.json({
-                action: "reply",
-                replies: ["No store connected."]
-            });
-        }
-
-        // FIXED: Properly awaited
-        const data = await shopifyApiCall(
-            firstBusiness.shopDomain,
-            firstBusiness.adminToken,
-            `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=5`
-        );
-
-        if (!data?.orders || data.orders.length === 0) {
-            return res.json({
-                action: "reply",
-                replies: [`No orders found for ${email}.`]
-            });
-        }
-
-        const latestOrder = data.orders[0];
-
-        const statusMessage = `📦 **Order #${latestOrder.name}**\n\n` +
-            `📅 Placed: ${new Date(latestOrder.created_at).toLocaleDateString()}\n` +
-            `💰 Total: ${latestOrder.total_price} ${latestOrder.currency}\n` +
-            `💳 Payment: ${latestOrder.financial_status}\n` +
-            `🚚 Status: ${latestOrder.fulfillment_status || 'Unfulfilled'}\n\n` +
-            `📋 Items: ${latestOrder.line_items.map(item => `${item.quantity}x ${item.name}`).join(', ')}`;
-
-        const buttons = [];
-        if (latestOrder.order_status_url) {
-            buttons.push({
-                label: "Track Shipment",
-                type: "url",
-                value: latestOrder.order_status_url
-            });
-        }
-
-        res.json({
-            action: "reply",
-            replies: [statusMessage],
-            buttons: buttons.length > 0 ? buttons : undefined
-        });
-
-    } catch (err) {
-        console.error("Error tracking order:", err);
-        res.json({
-            action: "reply",
-            replies: ["Error fetching your order details. Please try again."]
-        });
+    if (!email) {
+      return res.json({
+        action: "reply",
+        replies: ["Please provide your email address to track your order."]
+      });
     }
+
+    const firstBusiness = Array.from(businessDatabase.values())[0];
+
+    if (!firstBusiness) {
+      return res.json({
+        action: "reply",
+        replies: ["No store connected."]
+      });
+    }
+
+    // FIXED: Properly awaited
+    const data = await shopifyApiCall(
+      firstBusiness.shopDomain,
+      firstBusiness.adminToken,
+      `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=5`
+    );
+
+    if (!data?.orders || data.orders.length === 0) {
+      return res.json({
+        action: "reply",
+        replies: [`No orders found for ${email}.`]
+      });
+    }
+
+    const latestOrder = data.orders[0];
+
+    const statusMessage = `📦 **Order #${latestOrder.name}**\n\n` +
+      `📅 Placed: ${new Date(latestOrder.created_at).toLocaleDateString()}\n` +
+      `💰 Total: ${latestOrder.total_price} ${latestOrder.currency}\n` +
+      `💳 Payment: ${latestOrder.financial_status}\n` +
+      `🚚 Status: ${latestOrder.fulfillment_status || 'Unfulfilled'}\n\n` +
+      `📋 Items: ${latestOrder.line_items.map(item => `${item.quantity}x ${item.name}`).join(', ')}`;
+
+    const buttons = [];
+    if (latestOrder.order_status_url) {
+      buttons.push({
+        label: "Track Shipment",
+        type: "url",
+        value: latestOrder.order_status_url
+      });
+    }
+
+    res.json({
+      action: "reply",
+      replies: [statusMessage],
+      buttons: buttons.length > 0 ? buttons : undefined
+    });
+
+  } catch (err) {
+    console.error("Error tracking order:", err);
+    res.json({
+      action: "reply",
+      replies: ["Error fetching your order details. Please try again."]
+    });
+  }
 });
 
 // Add to cart endpoint
 app.post("/salesiq-add-to-cart", async (req, res) => {
-    try {
-        const variantId = req.body.variant_id || req.query.variant_id;
-        const quantity = req.body.quantity || req.query.quantity || 1;
-        let email = req.body.email || req.query.email;
+  try {
+    const variantId = req.body.variant_id || req.query.variant_id;
+    const quantity = req.body.quantity || req.query.quantity || 1;
+    let email = req.body.email || req.query.email;
 
-        if (!variantId) {
-            return res.json({
-                action: "reply",
-                replies: ["❌ Product information missing. Please try again."]
-            });
-        }
-
-        if (!email) {
-            email = `guest-${Date.now()}@store.local`;
-        }
-
-        const firstBusiness = Array.from(businessDatabase.values())[0];
-
-        if (!firstBusiness) {
-            return res.json({
-                action: "reply",
-                replies: ["No store connected."]
-            });
-        }
-
-        const draftBody = {
-            draft_order: {
-                email: email,
-                line_items: [
-                    {
-                        variant_id: parseInt(variantId),
-                        quantity: parseInt(quantity)
-                    }
-                ]
-            }
-        };
-
-        // FIXED: Properly awaited
-        const draftData = await shopifyApiCall(
-            firstBusiness.shopDomain,
-            firstBusiness.adminToken,
-            "/draft_orders.json",
-            "POST",
-            draftBody
-        );
-
-        if (!draftData?.draft_order) {
-            return res.json({
-                action: "reply",
-                replies: ["⚠️ Error adding to cart. Please try again."]
-            });
-        }
-
-        const itemCount = draftData.draft_order.line_items?.length || 1;
-        const totalPrice = draftData.draft_order.total_price || "0.00";
-
-        return res.json({
-            action: "reply",
-            replies: [
-                `✅ Added to cart!\n\n🛒 Cart: ${itemCount} item(s)\n💰 Total: $${totalPrice}`
-            ],
-            suggestions: ["🛍️ Browse More", "📦 View Cart", "💳 Checkout"]
-        });
-
-    } catch (err) {
-        console.error("Error adding to cart:", err);
-        return res.json({
-            action: "reply",
-            replies: [
-                `⚠️ Error adding to cart: ${err.message}`
-            ]
-        });
+    if (!variantId) {
+      return res.json({
+        action: "reply",
+        replies: ["❌ Product information missing. Please try again."]
+      });
     }
+
+    if (!email) {
+      email = `guest-${Date.now()}@store.local`;
+    }
+
+    const firstBusiness = Array.from(businessDatabase.values())[0];
+
+    if (!firstBusiness) {
+      return res.json({
+        action: "reply",
+        replies: ["No store connected."]
+      });
+    }
+
+    const draftBody = {
+      draft_order: {
+        email: email,
+        line_items: [
+          {
+            variant_id: parseInt(variantId),
+            quantity: parseInt(quantity)
+          }
+        ]
+      }
+    };
+
+    // FIXED: Properly awaited
+    const draftData = await shopifyApiCall(
+      firstBusiness.shopDomain,
+      firstBusiness.adminToken,
+      "/draft_orders.json",
+      "POST",
+      draftBody
+    );
+
+    if (!draftData?.draft_order) {
+      return res.json({
+        action: "reply",
+        replies: ["⚠️ Error adding to cart. Please try again."]
+      });
+    }
+
+    const itemCount = draftData.draft_order.line_items?.length || 1;
+    const totalPrice = draftData.draft_order.total_price || "0.00";
+
+    return res.json({
+      action: "reply",
+      replies: [
+        `✅ Added to cart!\n\n🛒 Cart: ${itemCount} item(s)\n💰 Total: $${totalPrice}`
+      ],
+      suggestions: ["🛍️ Browse More", "📦 View Cart", "💳 Checkout"]
+    });
+
+  } catch (err) {
+    console.error("Error adding to cart:", err);
+    return res.json({
+      action: "reply",
+      replies: [
+        `⚠️ Error adding to cart: ${err.message}`
+      ]
+    });
+  }
 });
 
 // Buy now endpoint
 app.post("/salesiq-buy-now", async (req, res) => {
-    try {
-        const payload = req.body;
-        const email = payload.session?.email?.value || payload.email;
-        const variantId = payload.variant_id;
-        const quantity = payload.quantity || 1;
+  try {
+    const payload = req.body;
+    const email = payload.session?.email?.value || payload.email;
+    const variantId = payload.variant_id;
+    const quantity = payload.quantity || 1;
 
-        if (!email) {
-            return res.json({
-                action: "reply",
-                replies: ["Please provide your email to complete the purchase."]
-            });
-        }
-
-        if (!variantId) {
-            return res.json({
-                action: "reply",
-                replies: ["Product information missing. Please try again."]
-            });
-        }
-
-        const firstBusiness = Array.from(businessDatabase.values())[0];
-
-        if (!firstBusiness) {
-            return res.json({
-                action: "reply",
-                replies: ["No store connected."]
-            });
-        }
-
-        const createBody = {
-            draft_order: {
-                email: email,
-                line_items: [
-                    {
-                        variant_id: variantId,
-                        quantity: quantity
-                    }
-                ]
-            }
-        };
-
-        // FIXED: Properly awaited
-        const created = await shopifyApiCall(
-            firstBusiness.shopDomain,
-            firstBusiness.adminToken,
-            "/draft_orders.json",
-            "POST",
-            createBody
-        );
-
-        const draftOrder = created?.draft_order;
-
-        if (!draftOrder) {
-            return res.json({
-                action: "reply",
-                replies: ["Couldn't process your order. Please try again."]
-            });
-        }
-
-        res.json({
-            action: "reply",
-            replies: [
-                `🎉 Your order is ready!\n\n💰 Total: $${draftOrder.total_price}`
-            ],
-            buttons: [
-                {
-                    label: "Complete Payment",
-                    type: "url",
-                    value: draftOrder.invoice_url
-                }
-            ]
-        });
-
-    } catch (err) {
-        console.error("Error creating buy now order:", err);
-        res.json({
-            action: "reply",
-            replies: ["Couldn't process your order. Please try again."]
-        });
+    if (!email) {
+      return res.json({
+        action: "reply",
+        replies: ["Please provide your email to complete the purchase."]
+      });
     }
+
+    if (!variantId) {
+      return res.json({
+        action: "reply",
+        replies: ["Product information missing. Please try again."]
+      });
+    }
+
+    const firstBusiness = Array.from(businessDatabase.values())[0];
+
+    if (!firstBusiness) {
+      return res.json({
+        action: "reply",
+        replies: ["No store connected."]
+      });
+    }
+
+    const createBody = {
+      draft_order: {
+        email: email,
+        line_items: [
+          {
+            variant_id: variantId,
+            quantity: quantity
+          }
+        ]
+      }
+    };
+
+    // FIXED: Properly awaited
+    const created = await shopifyApiCall(
+      firstBusiness.shopDomain,
+      firstBusiness.adminToken,
+      "/draft_orders.json",
+      "POST",
+      createBody
+    );
+
+    const draftOrder = created?.draft_order;
+
+    if (!draftOrder) {
+      return res.json({
+        action: "reply",
+        replies: ["Couldn't process your order. Please try again."]
+      });
+    }
+
+    res.json({
+      action: "reply",
+      replies: [
+        `🎉 Your order is ready!\n\n💰 Total: $${draftOrder.total_price}`
+      ],
+      buttons: [
+        {
+          label: "Complete Payment",
+          type: "url",
+          value: draftOrder.invoice_url
+        }
+      ]
+    });
+
+  } catch (err) {
+    console.error("Error creating buy now order:", err);
+    res.json({
+      action: "reply",
+      replies: ["Couldn't process your order. Please try again."]
+    });
+  }
 });
 
 // Return order endpoint
 app.post("/salesiq-return-order", async (req, res) => {
-    try {
-        const payload = req.body;
-        const orderId = payload.order_id;
-        const orderNumber = payload.order_number;
+  try {
+    const payload = req.body;
+    const orderId = payload.order_id;
+    const orderNumber = payload.order_number;
 
-        if (!orderId) {
-            return res.json({
-                action: "reply",
-                replies: ["Order information missing. Please try again."]
-            });
-        }
-
-        const firstBusiness = Array.from(businessDatabase.values())[0];
-
-        if (!firstBusiness) {
-            return res.json({
-                action: "reply",
-                replies: ["No store connected."]
-            });
-        }
-
-        // FIXED: Properly awaited
-        const orderData = await shopifyApiCall(
-            firstBusiness.shopDomain,
-            firstBusiness.adminToken,
-            `/orders/${orderId}.json`
-        );
-
-        const order = orderData?.order;
-
-        if (!order) {
-            return res.json({
-                action: "reply",
-                replies: ["Order not found. Please check the order number."]
-            });
-        }
-
-        res.json({
-            action: "reply",
-            replies: [
-                `🔄 **Return Request for Order #${orderNumber}**\n\nYour return has been initiated.`
-            ],
-            buttons: [
-                {
-                    label: "Track Return",
-                    type: "url",
-                    value: `https://${firstBusiness.shopDomain}/account/orders/${order.token}`
-                }
-            ]
-        });
-
-    } catch (err) {
-        console.error("Error processing return:", err);
-        res.json({
-            action: "reply",
-            replies: ["Couldn't process your return. Please contact support."]
-        });
+    if (!orderId) {
+      return res.json({
+        action: "reply",
+        replies: ["Order information missing. Please try again."]
+      });
     }
+
+    const firstBusiness = Array.from(businessDatabase.values())[0];
+
+    if (!firstBusiness) {
+      return res.json({
+        action: "reply",
+        replies: ["No store connected."]
+      });
+    }
+
+    // FIXED: Properly awaited
+    const orderData = await shopifyApiCall(
+      firstBusiness.shopDomain,
+      firstBusiness.adminToken,
+      `/orders/${orderId}.json`
+    );
+
+    const order = orderData?.order;
+
+    if (!order) {
+      return res.json({
+        action: "reply",
+        replies: ["Order not found. Please check the order number."]
+      });
+    }
+
+    res.json({
+      action: "reply",
+      replies: [
+        `🔄 **Return Request for Order #${orderNumber}**\n\nYour return has been initiated.`
+      ],
+      buttons: [
+        {
+          label: "Track Return",
+          type: "url",
+          value: `https://${firstBusiness.shopDomain}/account/orders/${order.token}`
+        }
+      ]
+    });
+
+  } catch (err) {
+    console.error("Error processing return:", err);
+    res.json({
+      action: "reply",
+      replies: ["Couldn't process your return. Please contact support."]
+    });
+  }
 });
 
 console.log('✅ PART 2 LOADED - Webhooks and legacy endpoints complete');
@@ -1319,7 +1322,7 @@ console.log('✅ PART 2 LOADED - Webhooks and legacy endpoints complete');
 // =====================================================
 
 app.get("/", (req, res) => {
-    res.send(`
+  res.send(`
     <!DOCTYPE html>
     <html>
     <head>
@@ -1392,34 +1395,34 @@ app.get("/", (req, res) => {
 // =====================================================
 
 app.get("/health", (req, res) => {
-    res.json({
-        status: "ok",
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        businesses: businessDatabase.size,
-        activeSessions: userSessions.size,
-        environment: {
-            SHOPIFY_API_KEY: SHOPIFY_API_KEY ? '✓ Set' : '❌ Missing',
-            SHOPIFY_API_SECRET: SHOPIFY_API_SECRET ? '✓ Set' : '❌ Missing',
-            BASE_URL: BASE_URL
-        }
-    });
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    businesses: businessDatabase.size,
+    activeSessions: userSessions.size,
+    environment: {
+      SHOPIFY_API_KEY: SHOPIFY_API_KEY ? '✓ Set' : '❌ Missing',
+      SHOPIFY_API_SECRET: SHOPIFY_API_SECRET ? '✓ Set' : '❌ Missing',
+      BASE_URL: BASE_URL
+    }
+  });
 });
 
 app.get("/api/shopify/config-check", (req, res) => {
-    res.json({
-        configured: {
-            SHOPIFY_API_KEY: !!SHOPIFY_API_KEY,
-            SHOPIFY_API_SECRET: !!SHOPIFY_API_SECRET,
-            BASE_URL: !!BASE_URL
-        },
-        values: {
-            SHOPIFY_API_KEY: SHOPIFY_API_KEY ? `${SHOPIFY_API_KEY.substring(0, 10)}...` : 'NOT SET',
-            BASE_URL: BASE_URL,
-            BUSINESSES: businessDatabase.size
-        },
-        timestamp: new Date().toISOString()
-    });
+  res.json({
+    configured: {
+      SHOPIFY_API_KEY: !!SHOPIFY_API_KEY,
+      SHOPIFY_API_SECRET: !!SHOPIFY_API_SECRET,
+      BASE_URL: !!BASE_URL
+    },
+    values: {
+      SHOPIFY_API_KEY: SHOPIFY_API_KEY ? `${SHOPIFY_API_KEY.substring(0, 10)}...` : 'NOT SET',
+      BASE_URL: BASE_URL,
+      BUSINESSES: businessDatabase.size
+    },
+    timestamp: new Date().toISOString()
+  });
 });
 
 // =====================================================
@@ -1427,34 +1430,34 @@ app.get("/api/shopify/config-check", (req, res) => {
 // =====================================================
 
 app.get("/api/debug/businesses", (req, res) => {
-    const businesses = Array.from(businessDatabase.values()).map(b => ({
-        businessId: b.businessId,
-        shopDomain: b.shopDomain,
-        shopName: b.shopName,
-        status: b.status,
-        connectedAt: b.connectedAt,
-        webhookUrl: b.webhookUrl
-    }));
+  const businesses = Array.from(businessDatabase.values()).map(b => ({
+    businessId: b.businessId,
+    shopDomain: b.shopDomain,
+    shopName: b.shopName,
+    status: b.status,
+    connectedAt: b.connectedAt,
+    webhookUrl: b.webhookUrl
+  }));
 
-    res.json({
-        total: businesses.length,
-        businesses: businesses
-    });
+  res.json({
+    total: businesses.length,
+    businesses: businesses
+  });
 });
 
 app.get("/api/debug/sessions", (req, res) => {
-    const sessions = Array.from(userSessions.entries()).map(([key, memory]) => ({
-        key: key,
-        businessId: memory.businessId,
-        userId: memory.userId,
-        messageCount: memory.messages.length,
-        lastMessage: memory.messages[memory.messages.length - 1]?.timestamp
-    }));
+  const sessions = Array.from(userSessions.entries()).map(([key, memory]) => ({
+    key: key,
+    businessId: memory.businessId,
+    userId: memory.userId,
+    messageCount: memory.messages.length,
+    lastMessage: memory.messages[memory.messages.length - 1]?.timestamp
+  }));
 
-    res.json({
-        total: sessions.length,
-        sessions: sessions
-    });
+  res.json({
+    total: sessions.length,
+    sessions: sessions
+  });
 });
 
 // =====================================================
@@ -1478,7 +1481,7 @@ async function startServer() {
     // FIXED: Load all businesses from files
     console.log('📦 Loading businesses from persistence...');
     const loadedBusinesses = await persistence.loadAllBusinesses();
-    
+
     // Populate businessDatabase from loaded data
     for (const [businessId, business] of loadedBusinesses) {
       businessDatabase.set(businessId, business);
@@ -1486,7 +1489,7 @@ async function startServer() {
         shopToBusinessMap.set(business.shopDomain, businessId);
       }
     }
-    
+
     console.log(`✅ Loaded ${businessDatabase.size} businesses from persistence\n`);
 
     // FIXED: Start the Express server
@@ -1496,7 +1499,7 @@ async function startServer() {
       console.log('\n' + '='.repeat(60));
       console.log('✅ SERVER READY FOR PRODUCTION');
       console.log('='.repeat(60) + '\n');
-      
+
       console.log('📊 SYSTEM STATUS:');
       console.log(`   • Connected stores: ${businessDatabase.size}`);
       console.log(`   • Active sessions: ${userSessions.size}`);
@@ -1517,7 +1520,7 @@ async function startServer() {
 
 process.on('SIGTERM', () => {
   console.log('\n📴 SIGTERM signal received: closing HTTP server...');
-  
+
   if (server) {
     server.close(() => {
       console.log('✅ HTTP server closed');
@@ -1539,7 +1542,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   console.log('\n📴 SIGINT signal received: closing HTTP server...');
-  
+
   if (server) {
     server.close(() => {
       console.log('✅ HTTP server closed');

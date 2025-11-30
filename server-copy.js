@@ -1,5 +1,5 @@
 // =====================================================
-// COMPLETE SHOPIFY + SALESIQ BOT BACKEND
+// COMPLETE SHOPIFY + SALESIQ BOT BACKEND - FIXED
 // Multi-Tenant AI-Powered E-Commerce Bot
 // =====================================================
 
@@ -31,7 +31,7 @@ dotenv.config();
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
 const API_VERSION = "2024-10";
-const BASE_URL = "https://zocie.onrender.com";
+const BASE_URL = process.env.BASE_URL || "https://zocie.onrender.com";
 
 // Validate env vars
 if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
@@ -44,57 +44,86 @@ if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
 // DATABASES (Use real DB in production)
 // =====================================================
 
-let oauthStates = new Map(); // state → { shop, timestamp }
+const oauthStates = new Map(); // state → { shop, timestamp }
 let businessDatabase = new Map(); // businessId → business data
-let shopToBusinessMap = new Map(); // shop domain → businessId
-let userSessions = new Map(); // "businessId_userId" → conversation memory
+const shopToBusinessMap = new Map(); // shop domain → businessId
+const userSessions = new Map(); // "businessId_userId" → conversation memory
 
 // =====================================================
 // CONVERSATION MEMORY CLASS
 // =====================================================
-
-
 
 class ConversationMemory {
   constructor(businessId, userId) {
     this.businessId = businessId;
     this.userId = userId;
     this.messages = [];
-    this.context = {};
+    this.context = {
+      email: null,
+      orderId: null,
+      previousActions: []
+    };
   }
 
-  addMessage(role, content) {
+  addMessage(role, content, metadata = {}) {
     this.messages.push({
       role,
       content,
+      metadata,
       timestamp: new Date().toISOString()
     });
+    
+    // Keep only last 50 messages
+    if (this.messages.length > 50) {
+      this.messages = this.messages.slice(-50);
+    }
   }
 
   remember(key, value) {
-    this.context[key] = value;
+    if (typeof value === 'object' && value !== null) {
+      this.context = { ...this.context, ...value };
+    } else {
+      this.context[key] = value;
+    }
   }
 
   recall(key) {
     return this.context[key];
   }
 
+  getContext() {
+    return this.context;
+  }
+
   async saveToFile() {
-    await persistence.saveConversationMemory(this.businessId, this.userId, {
-      messages: this.messages,
-      context: this.context
-    });
+    try {
+      await persistence.saveConversationMemory(this.businessId, this.userId, {
+        messages: this.messages,
+        context: this.context
+      });
+    } catch (error) {
+      console.error(`Error saving conversation to file:`, error);
+    }
   }
 
   static async loadFromFile(businessId, userId) {
-    const data = await persistence.loadConversationMemory(businessId, userId);
-    if (!data) {
+    try {
+      const data = await persistence.loadConversationMemory(businessId, userId);
+      if (!data) {
+        return new ConversationMemory(businessId, userId);
+      }
+      const memory = new ConversationMemory(businessId, userId);
+      memory.messages = data.messages || [];
+      memory.context = data.context || {
+        email: null,
+        orderId: null,
+        previousActions: []
+      };
+      return memory;
+    } catch (error) {
+      console.error(`Error loading conversation from file:`, error);
       return new ConversationMemory(businessId, userId);
     }
-    const memory = new ConversationMemory(businessId, userId);
-    memory.messages = data.messages || [];
-    memory.context = data.context || {};
-    return memory;
   }
 }
 
@@ -107,14 +136,39 @@ function generateBusinessId() {
 }
 
 async function saveBusinessData(businessId, businessData) {
-  businessDatabase.set(businessId, businessData);
-  // Save to file as well
-  await persistence.saveBusinessData(businessId, businessData);
+    try {
+        businessDatabase.set(businessId, businessData);
+        shopToBusinessMap.set(businessData.shopDomain, businessId);
+        // Save to file as well
+        await persistence.saveBusinessData(businessId, businessData);
+        console.log(`✅ Business data saved: ${businessId}`);
+    } catch (error) {
+        console.error(`Error saving business data:`, error);
+        throw error;
+    }
 }
 
-
 async function getBusinessData(businessId) {
-    return businessDatabase.get(businessId);
+    // Try memory first
+    if (businessDatabase.has(businessId)) {
+        return businessDatabase.get(businessId);
+    }
+    
+    // Try loading from file
+    try {
+        const data = await persistence.loadBusinessData(businessId);
+        if (data) {
+            businessDatabase.set(businessId, data);
+            if (data.shopDomain) {
+                shopToBusinessMap.set(data.shopDomain, businessId);
+            }
+            return data;
+        }
+    } catch (error) {
+        console.error(`Error loading business data:`, error);
+    }
+    
+    return null;
 }
 
 async function getBusinessIdByShop(shopDomain) {
@@ -142,7 +196,9 @@ async function shopifyApiCall(shopDomain, adminToken, endpoint, method = "GET", 
     try {
         const response = await fetch(url, options);
         if (!response.ok) {
+            const errorText = await response.text();
             console.error(`❌ Shopify API error: ${response.status} ${response.statusText}`);
+            console.error(`Response: ${errorText}`);
             return null;
         }
         return await response.json();
@@ -210,7 +266,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
             // Extract email from message if not in context
             if (!email) {
-                const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+/);
+                const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
                 if (emailMatch) {
                     email = emailMatch[0];
                 }
@@ -221,7 +277,8 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
                     needsInfo: true,
                     fieldNeeded: "email",
                     question: "📧 What's your email to find your order?",
-                    inputType: "email"
+                    inputType: "email",
+                    message: "Email required"
                 };
             }
 
@@ -257,7 +314,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
         case 'browse_deals': {
             const productsData = await shopifyCall(
-                `/products.json?limit=10&sort=created_at:desc`
+                `/products.json?limit=10&published_status=published`
             );
 
             if (!productsData?.products || productsData.products.length === 0) {
@@ -294,7 +351,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
         case 'add_cart': {
             let email = context.email;
             if (!email) {
-                const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+/);
+                const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
                 if (emailMatch) {
                     email = emailMatch[0];
                 }
@@ -305,7 +362,8 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
                     needsInfo: true,
                     fieldNeeded: "email",
                     question: "📧 I need your email to add items to your cart",
-                    inputType: "email"
+                    inputType: "email",
+                    message: "Email required"
                 };
             }
 
@@ -352,7 +410,8 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
                     needsInfo: true,
                     fieldNeeded: "email",
                     question: "📧 What's your email to complete the purchase?",
-                    inputType: "email"
+                    inputType: "email",
+                    message: "Email required"
                 };
             }
 
@@ -369,7 +428,8 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
                     needsInfo: true,
                     fieldNeeded: "email",
                     question: "📧 What's your email for the return?",
-                    inputType: "email"
+                    inputType: "email",
+                    message: "Email required"
                 };
             }
 
@@ -418,11 +478,11 @@ function buildSalesIQResponse(actionResult) {
         response.action = "reply";
         response.replies = [actionResult.message];
 
-        if (actionResult.suggestions) {
+        if (actionResult.suggestions && actionResult.suggestions.length > 0) {
             response.suggestions = actionResult.suggestions;
         }
 
-        if (actionResult.buttons) {
+        if (actionResult.buttons && actionResult.buttons.length > 0) {
             response.buttons = actionResult.buttons;
         }
     }
@@ -560,25 +620,7 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
             webhookUrl: `${BASE_URL}/api/zobot/${businessId}`
         };
 
-        await saveBusinessData(businessData);
-
-        // ✅ FETCH PRODUCT COUNT FOR DISPLAY
-        const productsUrl = `https://${shop}/admin/api/${API_VERSION}/products.json?limit=1`;
-        let productCount = 0;
-        try {
-            const productsResponse = await fetch(productsUrl, {
-                headers: {
-                    "X-Shopify-Access-Token": accessToken,
-                    "Content-Type": "application/json"
-                }
-            });
-            if (productsResponse.ok) {
-                const productsData = await productsResponse.json();
-                productCount = productsData.products?.length || 0;
-            }
-        } catch (err) {
-            console.log('⚠️ Could not fetch product count:', err.message);
-        }
+        await saveBusinessData(businessId, businessData);
 
         console.log('✅ Business successfully configured!');
 
@@ -659,7 +701,7 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
               <p class="text-sm text-gray-600 mb-3">Copy this URL to your Zoho SalesIQ bot settings:</p>
               
               <div class="bg-white rounded p-4 mb-4 flex items-center justify-between">
-                de class="text-sm font-mono text-gray-800 break-all">${businessData.webhookUrl}</code>
+                <code class="text-sm font-mono text-gray-800 break-all">${businessData.webhookUrl}</code>
                 <button 
                   onclick="copyToClipboard('${businessData.webhookUrl}')"
                   class="ml-3 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold whitespace-nowrap"
@@ -668,7 +710,7 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
                 </button>
               </div>
 
-              <p class="text-xs text-blue-600">Business ID: de>${businessId}</code></p>
+              <p class="text-xs text-blue-600">Business ID: <code>${businessId}</code></p>
             </div>
 
             <!-- Setup Instructions -->
@@ -767,72 +809,218 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
 // MULTI-TENANT ZOBOT WEBHOOK
 // =====================================================
 
+// =====================================================
+// MULTI-TENANT ZOBOT WEBHOOK (COMPLETE FIXED VERSION)
+// =====================================================
+
 app.post("/api/zobot/:businessId", async (req, res) => {
-    try {
-        const { businessId } = req.params;
-        const { message, visitor, operation } = req.body;
+  try {
+    const { businessId } = req.params;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📨 WEBHOOK REQUEST RECEIVED`);
+    console.log(`Business ID: ${businessId}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    console.log(`Full Request Body:`, JSON.stringify(req.body, null, 2));
+    console.log(`${'='.repeat(60)}\n`);
 
-        console.log(`📨 Zobot message received for business: ${businessId}`);
-
-        // ✅ LOAD BUSINESS DATA
-        const business = await getBusinessData(businessId);
-
-        if (!business) {
-            console.error(`❌ Business not found: ${businessId}`);
-            return res.json({
-                action: "reply",
-                replies: ["Sorry, bot configuration not found. Please reconnect your store."]
-            });
-        }
-
-        const { adminToken, shopDomain } = business;
-        const userId = visitor?.email || visitor?.id || "anonymous";
-
-        // ✅ GET OR CREATE CONVERSATION MEMORY
-        const memoryKey = `${businessId}_${userId}`;
-        if (!userSessions.has(memoryKey)) {
-            userSessions.set(memoryKey, new ConversationMemory(userId));
-        }
-        const memory = userSessions.get(memoryKey);
-
-        // ✅ DETECT INTENT
-        const { intent } = await detectIntent(message.text);
-        console.log(`🧠 Intent detected: ${intent}`);
-
-        memory.addMessage('user', message.text, { intent });
-
-        // ✅ GET CONTEXT FROM MEMORY
-        const context = memory.getContext();
-
-        // ✅ EXECUTE ACTION USING BUSINESS-SPECIFIC DATA
-        const actionResult = await executeAction(
-            intent,
-            message.text,
-            context,
-            shopDomain,
-            adminToken
-        );
-
-        // ✅ BUILD SALESIQ RESPONSE
-        const response = buildSalesIQResponse(actionResult);
-
-        // ✅ REMEMBER FOR NEXT INTERACTION
-        memory.addMessage('bot', actionResult.message);
-
-        if (actionResult.remember) {
-            memory.remember(intent, actionResult.data);
-        }
-
-        console.log(`✅ Response sent for intent: ${intent}`);
-        res.json(response);
-
-    } catch (error) {
-        console.error('❌ Zobot webhook error:', error);
-        res.json({
-            action: "reply",
-            replies: ["An error occurred. Please try again or contact support."]
-        });
+    // ✅ LOAD BUSINESS DATA (from memory or file)
+    let business = await getBusinessData(businessId);
+    
+    if (!business) {
+      console.error(`❌ Business not found: ${businessId}`);
+      return res.json({
+        action: "reply",
+        replies: ["Sorry, bot configuration not found. Please reconnect your store."],
+        suggestions: ["Help", "Contact Support"]
+      });
     }
+
+    console.log(`✅ Business found: ${business.shopName} (${business.shopDomain})`);
+    console.log(`   Status: ${business.status}`);
+    console.log(`   Connected: ${business.connectedAt}`);
+
+    const { adminToken, shopDomain } = business;
+    
+    // ✅ EXTRACT MESSAGE - HANDLE ALL POSSIBLE FORMATS
+    let messageText = null;
+    let visitor = {};
+    let operation = "message";
+
+    console.log(`\n🔍 Parsing message from SalesIQ...`);
+
+    // Try multiple ways to get the message (SalesIQ sends in different formats)
+    if (req.body?.message?.text) {
+      messageText = req.body.message.text;
+      visitor = req.body.visitor || {};
+      operation = req.body.operation || "message";
+      console.log(`✅ Format 1: Direct message.text found`);
+    } 
+    else if (req.body?.text) {
+      messageText = req.body.text;
+      visitor = req.body.visitor || {};
+      console.log(`✅ Format 2: Root level text found`);
+    } 
+    else if (req.body?.session?.message) {
+      messageText = req.body.session.message;
+      visitor = req.body.session.visitor || {};
+      console.log(`✅ Format 3: Session message found`);
+    }
+    else if (req.body?.data?.message) {
+      messageText = req.body.data.message;
+      visitor = req.body.data.visitor || {};
+      console.log(`✅ Format 4: Data wrapper found`);
+    }
+    else if (req.body?.payload?.message) {
+      messageText = req.body.payload.message;
+      visitor = req.body.payload.visitor || {};
+      console.log(`✅ Format 5: Payload wrapper found`);
+    }
+    // Last resort - check if there's ANY text property
+    else {
+      for (const [key, value] of Object.entries(req.body)) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          messageText = value;
+          console.log(`✅ Format 6: Found text in key: ${key}`);
+          break;
+        }
+        if (typeof value === 'object' && value?.text) {
+          messageText = value.text;
+          console.log(`✅ Format 7: Found text in nested object: ${key}`);
+          break;
+        }
+      }
+    }
+
+    // If still no message, return helpful error
+    if (!messageText || messageText.trim() === '') {
+      console.error(`❌ No message text found in any format`);
+      console.error(`Request keys:`, Object.keys(req.body));
+      
+      return res.json({
+        action: "reply",
+        replies: [
+          "👋 I couldn't understand your message. Please try again!",
+          "Try saying: 'show me deals', 'track order', 'add to cart', or 'help'"
+        ],
+        suggestions: ["Browse Deals", "Track Order", "Help"]
+      });
+    }
+
+    console.log(`📝 Message extracted: "${messageText}"`);
+    console.log(`👤 Visitor data:`, JSON.stringify(visitor, null, 2));
+
+    // Generate userId from visitor info
+    const userId = visitor?.email || visitor?.id || visitor?.name || `visitor_${Date.now()}`;
+    console.log(`🆔 User ID: ${userId}`);
+
+    // ✅ GET OR CREATE CONVERSATION MEMORY
+    const memoryKey = `${businessId}_${userId}`;
+    let memory;
+
+    if (!userSessions.has(memoryKey)) {
+      // Try to load from file first
+      console.log(`💾 Loading conversation memory from file...`);
+      memory = await ConversationMemory.loadFromFile(businessId, userId);
+      userSessions.set(memoryKey, memory);
+      console.log(`✨ Conversation session created/loaded`);
+    } else {
+      memory = userSessions.get(memoryKey);
+      console.log(`♻️ Reusing existing session`);
+    }
+
+    const activeSessions = Array.from(userSessions.keys())
+      .filter(k => k.startsWith(businessId)).length;
+    console.log(`💾 Active sessions for this business: ${activeSessions}`);
+
+    // ✅ DETECT INTENT
+    console.log(`\n🧠 INTENT DETECTION`);
+    const { intent, confidence } = await detectIntent(messageText);
+    console.log(`   Intent: ${intent}`);
+    console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);
+    
+    // Add message to memory with metadata
+    memory.addMessage('user', messageText, { intent, confidence });
+
+    // ✅ GET CONTEXT FROM MEMORY
+    const context = memory.getContext();
+    console.log(`\n📋 CONTEXT FROM MEMORY`);
+    console.log(`   Email: ${context.email || 'Not set'}`);
+    console.log(`   Order ID: ${context.orderId || 'None'}`);
+    console.log(`   Previous actions:`, context.previousActions || []);
+
+    // ✅ EXECUTE ACTION
+    console.log(`\n⚙️ EXECUTING ACTION`);
+    console.log(`   Shop: ${shopDomain}`);
+    console.log(`   Intent: ${intent}`);
+    
+    const actionResult = await executeAction(
+      intent,
+      messageText,
+      context,
+      shopDomain,
+      adminToken
+    );
+
+    console.log(`   ✅ Action completed successfully`);
+    if (actionResult.needsInfo) {
+      console.log(`   ⚠️ Additional info needed: ${actionResult.fieldNeeded}`);
+    }
+
+    // ✅ BUILD SALESIQ RESPONSE
+    const response = buildSalesIQResponse(actionResult);
+    console.log(`\n📤 BUILDING RESPONSE`);
+    console.log(`   Action type: ${response.action}`);
+    console.log(`   Has suggestions: ${!!response.suggestions}`);
+    console.log(`   Has buttons: ${!!response.buttons}`);
+    
+    // ✅ UPDATE MEMORY AND PERSIST
+    memory.addMessage('bot', actionResult.message, { 
+      intent, 
+      actionType: response.action 
+    });
+    
+    if (actionResult.remember && actionResult.data) {
+      memory.remember(actionResult.data);
+      
+      // Track action in context
+      if (!context.previousActions) {
+        context.previousActions = [];
+      }
+      context.previousActions.push({
+        intent,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log(`   💾 Data saved to memory`);
+    }
+
+    // Save memory to file (async, don't wait)
+    memory.saveToFile().catch(err => {
+      console.error(`⚠️ Failed to save conversation to file:`, err);
+    });
+
+    console.log(`\n✅ Response sent successfully`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    res.json(response);
+
+  } catch (error) {
+    console.error(`\n${'='.repeat(60)}`);
+    console.error(`❌ ZOBOT WEBHOOK ERROR`);
+    console.error(`Error: ${error.message}`);
+    console.error(`Stack trace:`, error.stack);
+    console.error(`${'='.repeat(60)}\n`);
+    
+    res.json({
+      action: "reply",
+      replies: [
+        `⚠️ An error occurred: ${error.message}`,
+        "Please try again or contact support if the issue persists."
+      ],
+      suggestions: ["Try Again", "Browse Deals", "Help"]
+    });
+  }
 });
 
 // =====================================================
@@ -846,9 +1034,14 @@ app.get("/api/business/:businessId", async (req, res) => {
         const business = await getBusinessData(businessId);
 
         if (!business) {
-            return res.status(404).json({ error: "Business not found" });
+            return res.status(404).json({ 
+              error: "Business not found",
+              businessId: businessId,
+              message: "This business configuration does not exist. Please reconnect your store."
+            });
         }
 
+        // Return business info (hide sensitive data)
         res.json({
             businessId: business.businessId,
             shopName: business.shopName,
@@ -860,18 +1053,119 @@ app.get("/api/business/:businessId", async (req, res) => {
             connectedAt: business.connectedAt,
             webhookUrl: business.webhookUrl,
             features: [
-                { name: "Browse Deals", enabled: true },
-                { name: "Track Orders", enabled: true },
-                { name: "Add to Cart", enabled: true },
-                { name: "Buy Now", enabled: true },
-                { name: "Process Returns", enabled: true },
-                { name: "Memory Context", enabled: true }
+                { name: "Browse Deals", enabled: true, icon: "🛍️" },
+                { name: "Track Orders", enabled: true, icon: "📦" },
+                { name: "Add to Cart", enabled: true, icon: "🛒" },
+                { name: "Buy Now", enabled: true, icon: "💳" },
+                { name: "Process Returns", enabled: true, icon: "🔄" },
+                { name: "Memory Context", enabled: true, icon: "🧠" }
             ]
         });
 
     } catch (error) {
         console.error('❌ Error fetching business data:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ 
+          error: "Internal server error",
+          message: error.message 
+        });
+    }
+});
+
+// =====================================================
+// CHECK SHOP CONNECTION STATUS
+// =====================================================
+
+app.get("/api/shopify/status/:shopDomain", async (req, res) => {
+    try {
+        const { shopDomain } = req.params;
+        
+        const businessId = shopToBusinessMap.get(shopDomain);
+        
+        if (!businessId) {
+            return res.json({
+                connected: false,
+                shopDomain: shopDomain,
+                message: "Shop not connected"
+            });
+        }
+        
+        const business = await getBusinessData(businessId);
+        
+        if (!business) {
+            return res.json({
+                connected: false,
+                shopDomain: shopDomain,
+                message: "Business data not found"
+            });
+        }
+        
+        res.json({
+            connected: true,
+            shopDomain: shopDomain,
+            businessId: businessId,
+            shopName: business.shopName,
+            status: business.status,
+            connectedAt: business.connectedAt,
+            webhookUrl: business.webhookUrl
+        });
+        
+    } catch (error) {
+        console.error('❌ Error checking shop status:', error);
+        res.status(500).json({ 
+          error: "Internal server error",
+          message: error.message 
+        });
+    }
+});
+
+// =====================================================
+// RECONNECT EXISTING SHOP (Update tokens)
+// =====================================================
+
+app.post("/api/shopify/reconnect", async (req, res) => {
+    try {
+        const { businessId, shopDomain, adminToken } = req.body;
+        
+        if (!businessId || !shopDomain || !adminToken) {
+            return res.status(400).json({
+                error: "Missing required fields: businessId, shopDomain, adminToken"
+            });
+        }
+        
+        // Load existing business
+        let business = await getBusinessData(businessId);
+        
+        if (!business) {
+            return res.status(404).json({
+                error: "Business not found",
+                businessId: businessId
+            });
+        }
+        
+        // Update token and timestamp
+        business.adminToken = adminToken;
+        business.lastReconnected = new Date().toISOString();
+        business.status = "active";
+        
+        // Save updated business
+        await saveBusinessData(businessId, business);
+        
+        console.log(`✅ Business reconnected: ${businessId}`);
+        
+        res.json({
+            success: true,
+            businessId: businessId,
+            shopDomain: shopDomain,
+            webhookUrl: business.webhookUrl,
+            message: "Business reconnected successfully"
+        });
+        
+    } catch (error) {
+        console.error('❌ Error reconnecting business:', error);
+        res.status(500).json({ 
+          error: "Internal server error",
+          message: error.message 
+        });
     }
 });
 
@@ -879,7 +1173,7 @@ app.get("/api/business/:businessId", async (req, res) => {
 // LEGACY ENDPOINTS (For backward compatibility)
 // =====================================================
 
-// Deals endpoint - uses default store (fractix)
+// Deals endpoint - uses first available store
 app.post("/salesiq-deals", async (req, res) => {
     try {
         // Get first business as fallback
@@ -895,7 +1189,7 @@ app.post("/salesiq-deals", async (req, res) => {
         const data = await shopifyApiCall(
             firstBusiness.shopDomain,
             firstBusiness.adminToken,
-            "/products.json?limit=10&sort=created_at:desc"
+            "/products.json?limit=10&published_status=published"
         );
 
         const products = data?.products || [];
@@ -1028,8 +1322,8 @@ app.post("/salesiq-add-to-cart", async (req, res) => {
         const quantity = req.body.quantity || req.query.quantity || 1;
         let email = req.body.email || req.query.email;
 
-        if (!email && req.session?.email) {
-            email = req.session.email.value || req.session.email;
+        if (!email && req.body.session?.email) {
+            email = req.body.session.email.value || req.body.session.email;
         }
 
         if (!variantId) {
@@ -1287,7 +1581,9 @@ app.get("/", (req, res) => {
           <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-center rounded-lg mb-8">
             <h2 class="text-2xl font-bold text-white">✅ Bot Backend Active</h2>
             <p class="text-blue-100">All systems operational</p>
-          </div>          <div class="grid md:grid-cols-2 gap-6 mb-8">
+          </div>
+          
+          <div class="grid md:grid-cols-2 gap-6 mb-8">
             <div class="bg-green-50 p-6 rounded-lg">
               <h3 class="font-bold text-gray-800 mb-2">📊 Connected Stores</h3>
               <p class="text-3xl font-bold text-green-600">${businessDatabase.size}</p>
@@ -1304,13 +1600,14 @@ app.get("/", (req, res) => {
             <h3 class="text-lg font-bold text-gray-800 mb-4">🚀 Features Active</h3>
             <ul class="space-y-2 text-gray-700">
               <li>✅ Multi-tenant Shopify integration</li>
+              <li>✅ Persistent webhook URLs</li>
               <li>✅ Natural language intent detection</li>
               <li>✅ Conversation memory system</li>
               <li>✅ Real-time product fetching</li>
               <li>✅ Order tracking & management</li>
               <li>✅ Draft order creation</li>
               <li>✅ Return processing</li>
-              <li>✅ Zoho SalesIQ webhook support</li>
+              <li>✅ File-based persistence</li>
             </ul>
           </div>
 
@@ -1319,14 +1616,15 @@ app.get("/", (req, res) => {
               🔗 <strong>Webhook Format:</strong> POST /api/zobot/{businessId}
             </p>
             <p class="text-sm text-yellow-800 mt-2">
-              📝 Each connected store gets a unique webhook URL
+              📝 Each connected store gets a permanent webhook URL
             </p>
           </div>
         </div>
 
         <div class="mt-12 text-center">
           <p class="text-gray-600">Status: <span class="font-bold text-green-600">🟢 Online</span></p>
-          <p class="text-sm text-gray-500 mt-2">Last updated: ${new Date().toISOString()}</p>
+          <p class="text-sm text-gray-500 mt-2">Server uptime: ${Math.floor(process.uptime())}s</p>
+          <p class="text-sm text-gray-500">Last updated: ${new Date().toISOString()}</p>
         </div>
       </div>
     </body>
@@ -1384,281 +1682,191 @@ app.get("/api/debug/businesses", (req, res) => {
         shopName: b.shopName,
         status: b.status,
         connectedAt: b.connectedAt,
-        webhookUrl: b.webhookUrl
+        webhookUrl: b.webhookUrl,
+        lastReconnected: b.lastReconnected || null
     }));
 
     res.json({
         total: businesses.length,
-        businesses: businesses
+        businesses: businesses,
+        shopMappings: Object.fromEntries(shopToBusinessMap)
     });
 });
-
 // =====================================================
-// MULTI-TENANT ZOBOT WEBHOOK (FIXED VERSION)
-// =====================================================
-
-app.post("/api/zobot/:businessId", async (req, res) => {
-  try {
-    const { businessId } = req.params;
-    
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`📨 WEBHOOK REQUEST RECEIVED`);
-    console.log(`Business ID: ${businessId}`);
-    console.log(`Full Request Body:`, JSON.stringify(req.body, null, 2));
-    console.log(`${'='.repeat(60)}\n`);
-
-    // ✅ LOAD BUSINESS DATA
-    const business = await getBusinessData(businessId);
-    
-    if (!business) {
-      console.error(`❌ Business not found: ${businessId}`);
-      return res.json({
-        action: "reply",
-        replies: ["Sorry, bot configuration not found. Please reconnect your store."]
-      });
-    }
-
-    console.log(`✅ Business found: ${business.shopName}`);
-
-    const { adminToken, shopDomain } = business;
-    
-    // ✅ EXTRACT MESSAGE - HANDLE ALL POSSIBLE FORMATS
-    let messageText = null;
-    let visitor = {};
-    let operation = "message";
-
-    console.log(`\n🔍 Parsing message from SalesIQ...`);
-
-    // Try multiple ways to get the message
-    if (req.body?.message?.text) {
-      messageText = req.body.message.text;
-      visitor = req.body.visitor || {};
-      operation = req.body.operation || "message";
-      console.log(`✅ Format 1: Direct message.text found`);
-    } 
-    else if (req.body?.text) {
-      messageText = req.body.text;
-      visitor = req.body.visitor || {};
-      console.log(`✅ Format 2: Root level text found`);
-    } 
-    else if (req.body?.session?.message) {
-      messageText = req.body.session.message;
-      visitor = req.body.session.visitor || {};
-      console.log(`✅ Format 3: Session message found`);
-    }
-    else if (req.body?.data?.message) {
-      messageText = req.body.data.message;
-      visitor = req.body.data.visitor || {};
-      console.log(`✅ Format 4: Data wrapper found`);
-    }
-    else if (req.body?.payload?.message) {
-      messageText = req.body.payload.message;
-      visitor = req.body.payload.visitor || {};
-      console.log(`✅ Format 5: Payload wrapper found`);
-    }
-    // Last resort - check if there's ANY text property
-    else {
-      for (const [key, value] of Object.entries(req.body)) {
-        if (typeof value === 'string' && value.trim().length > 0) {
-          messageText = value;
-          console.log(`✅ Format 6: Found text in key: ${key}`);
-          break;
-        }
-        if (typeof value === 'object' && value?.text) {
-          messageText = value.text;
-          console.log(`✅ Format 7: Found text in nested object: ${key}`);
-          break;
-        }
-      }
-    }
-
-    // If still no message, return error with debugging info
-    if (!messageText || messageText.trim() === '') {
-      console.error(`❌ No message text found in any format`);
-      console.error(`Request keys:`, Object.keys(req.body));
-      console.error(`Full body:`, JSON.stringify(req.body, null, 2));
-      
-      return res.json({
-        action: "reply",
-        replies: [
-          "I couldn't understand your message. Please try again.",
-          "Try saying: 'show me deals', 'track order', 'add to cart', 'buy now', or 'return order'"
-        ],
-        suggestions: ["Browse Deals", "Track Order", "Help"]
-      });
-    }
-
-    console.log(`📝 Message extracted: "${messageText}"`);
-    console.log(`👤 Visitor data:`, visitor);
-
-    const userId = visitor?.email || visitor?.id || visitor?.name || `user_${Date.now()}`;
-    console.log(`🆔 User ID: ${userId}`);
-
-    // ✅ GET OR CREATE CONVERSATION MEMORY
-    const memoryKey = `${businessId}_${userId}`;
-    if (!userSessions.has(memoryKey)) {
-      userSessions.set(memoryKey, new ConversationMemory(userId));
-      console.log(`✨ New conversation session created`);
-    }
-    const memory = userSessions.get(memoryKey);
-    const activeSessions = Array.from(userSessions.keys()).filter(k => k.startsWith(businessId)).length;
-    console.log(`💾 Active sessions for this business: ${activeSessions}`);
-
-    // ✅ DETECT INTENT
-    console.log(`\n🧠 INTENT DETECTION`);
-    const { intent, confidence } = await detectIntent(messageText);
-    console.log(`   Intent: ${intent}`);
-    console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);
-    
-    memory.addMessage('user', messageText, { intent });
-
-    // ✅ GET CONTEXT FROM MEMORY
-    const context = memory.getContext();
-    console.log(`\n📋 CONTEXT`);
-    console.log(`   Email: ${context.email || 'Not set'}`);
-    console.log(`   Previous actions: ${context.previousActions.length}`);
-
-    // ✅ EXECUTE ACTION
-    console.log(`\n⚙️ EXECUTING ACTION`);
-    console.log(`   Shop: ${shopDomain}`);
-    console.log(`   Intent: ${intent}`);
-    
-    const actionResult = await executeAction(
-      intent,
-      messageText,
-      context,
-      shopDomain,
-      adminToken
-    );
-
-    console.log(`   ✅ Action completed`);
-
-    // ✅ BUILD SALESIQ RESPONSE
-    const response = buildSalesIQResponse(actionResult);
-    console.log(`\n📤 RESPONSE`);
-    console.log(`   Action: ${response.action}`);
-    console.log(`   Message: ${response.replies?.[0]?.substring(0, 50)}...`);
-    
-    // ✅ REMEMBER FOR NEXT INTERACTION
-    memory.addMessage('bot', actionResult.message);
-    
-    if (actionResult.remember) {
-      memory.remember(intent, actionResult.data);
-      console.log(`   💾 Data saved to memory`);
-    }
-
-    console.log(`\n✅ Response sent successfully`);
-    console.log(`${'='.repeat(60)}\n`);
-    
-    res.json(response);
-
-  } catch (error) {
-    console.error(`\n${'='.repeat(60)}`);
-    console.error(`❌ ZOBOT WEBHOOK ERROR`);
-    console.error(`Error: ${error.message}`);
-    console.error(`Line: ${error.stack.split('\n')[1]}`);
-    console.error(`${'='.repeat(60)}\n`);
-    
-    res.status(500).json({
-      action: "reply",
-      replies: [
-        `⚠️ Sorry, an error occurred: ${error.message}`,
-        "Please try again or contact support."
-      ],
-      suggestions: ["Help", "Browse Deals", "Try Again"]
-    });
-  }
-});
-
-// =====================================================
-// GRACEFUL SHUTDOWN (FIXED)
+// GRACEFUL SHUTDOWN
 // =====================================================
 
 let server = null;
 
 const PORT = process.env.PORT || 3000;
+
 async function startServer() {
   try {
-    // Initialize persistence and load data from files
+    console.log('\n🚀 Starting server...\n');
+    
+    // ✅ 1. Initialize persistence directories
+    console.log('📁 Initializing persistence...');
     await persistence.initializePersistence();
+    
+    // ✅ 2. Load all businesses from files
+    console.log('💼 Loading businesses from storage...');
     businessDatabase = await persistence.loadAllBusinesses();
     
-    // Rebuild shop to business mapping
+    // ✅ 3. Rebuild shop to business mapping
+    console.log('🗺️ Rebuilding shop mappings...');
     for (const [businessId, business] of businessDatabase) {
-      if (business.shop) {
-        shopToBusinessMap.set(business.shop, businessId);
+      if (business.shopDomain) {
+        shopToBusinessMap.set(business.shopDomain, businessId);
+        console.log(`   ✓ Mapped: ${business.shopDomain} → ${businessId}`);
       }
     }
     
-    console.log(`✓ Loaded ${businessDatabase.size} businesses from persistence`);
+    console.log(`\n✅ Loaded ${businessDatabase.size} business(es) from persistence`);
+    console.log(`✅ Mapped ${shopToBusinessMap.size} shop domain(s)\n`);
     
+    // ✅ 4. Start Express server
     server = app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+      console.log('\n' + '='.repeat(60));
+      console.log('🎉 SERVER STARTED SUCCESSFULLY');
+      console.log('='.repeat(60));
+      console.log(`📡 Server running on port: ${PORT}`);
+      console.log(`🌐 Base URL: ${BASE_URL}`);
+      console.log(`📊 Connected Stores: ${businessDatabase.size}`);
+      console.log(`💾 Active Sessions: ${userSessions.size}`);
+      console.log(`⏰ Started at: ${new Date().toISOString()}`);
+      console.log('='.repeat(60) + '\n');
     });
+    
   } catch (error) {
-    console.error('Error starting server:', error);
+    console.error('\n' + '='.repeat(60));
+    console.error('❌ FATAL ERROR: Server failed to start');
+    console.error('='.repeat(60));
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
+    console.error('='.repeat(60) + '\n');
     process.exit(1);
   }
 }
 
-startServer();
+// =====================================================
+// SHUTDOWN HANDLERS
+// =====================================================
 
-// Graceful shutdown - properly handle server close
-process.on('SIGTERM', () => {
-  console.log('\n📴 SIGTERM signal received: closing HTTP server...');
+// Handle SIGTERM signal (from hosting platforms like Render)
+process.on('SIGTERM', async () => {
+  console.log('\n' + '='.repeat(60));
+  console.log('📴 SIGTERM signal received');
+  console.log('='.repeat(60));
+  console.log('Initiating graceful shutdown...\n');
   
-  if (server) {
-    server.close(() => {
-      console.log('✅ HTTP server closed');
-      console.log(`📊 Final Stats:`);
-      console.log(`   Connected Stores: ${businessDatabase.size}`);
-      console.log(`   Active Sessions: ${userSessions.size}`);
-      process.exit(0);
-    });
-
-    // Force close after 10 seconds
-    setTimeout(() => {
-      console.error('❌ Server did not close gracefully, forcing exit');
-      process.exit(1);
-    }, 10000);
-  } else {
-    process.exit(0);
-  }
+  await gracefulShutdown('SIGTERM');
 });
 
-process.on('SIGINT', () => {
-  console.log('\n📴 SIGINT signal received: closing HTTP server...');
+// Handle SIGINT signal (Ctrl+C in terminal)
+process.on('SIGINT', async () => {
+  console.log('\n' + '='.repeat(60));
+  console.log('📴 SIGINT signal received (Ctrl+C)');
+  console.log('='.repeat(60));
+  console.log('Initiating graceful shutdown...\n');
   
-  if (server) {
-    server.close(() => {
-      console.log('✅ HTTP server closed');
-      console.log(`📊 Final Stats:`);
-      console.log(`   Connected Stores: ${businessDatabase.size}`);
-      console.log(`   Active Sessions: ${userSessions.size}`);
-      process.exit(0);
-    });
-
-    // Force close after 10 seconds
-    setTimeout(() => {
-      console.error('❌ Server did not close gracefully, forcing exit');
-      process.exit(1);
-    }, 10000);
-  } else {
-    process.exit(0);
-  }
+  await gracefulShutdown('SIGINT');
 });
 
-// Uncaught exceptions
+// Graceful shutdown function
+async function gracefulShutdown(signal) {
+  console.log(`⏳ Shutting down gracefully (${signal})...`);
+  
+  try {
+    // ✅ 1. Save all active conversation sessions
+    console.log('\n💾 Saving active conversation sessions...');
+    let savedCount = 0;
+    for (const [key, memory] of userSessions) {
+      try {
+        await memory.saveToFile();
+        savedCount++;
+      } catch (err) {
+        console.error(`   ⚠️ Failed to save session ${key}:`, err.message);
+      }
+    }
+    console.log(`   ✓ Saved ${savedCount} conversation session(s)`);
+    
+    // ✅ 2. Close HTTP server
+    if (server) {
+      console.log('\n🔌 Closing HTTP server...');
+      await new Promise((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      console.log('   ✓ HTTP server closed successfully');
+    }
+    
+    // ✅ 3. Final statistics
+    console.log('\n📊 Final Statistics:');
+    console.log(`   Connected Stores: ${businessDatabase.size}`);
+    console.log(`   Active Sessions: ${userSessions.size}`);
+    console.log(`   Total Uptime: ${Math.floor(process.uptime())}s`);
+    
+    console.log('\n' + '='.repeat(60));
+    console.log('✅ Shutdown completed successfully');
+    console.log('='.repeat(60) + '\n');
+    
+    process.exit(0);
+    
+  } catch (error) {
+    console.error('\n' + '='.repeat(60));
+    console.error('❌ Error during shutdown:');
+    console.error('='.repeat(60));
+    console.error(error);
+    console.error('='.repeat(60) + '\n');
+    process.exit(1);
+  }
+}
+
+// =====================================================
+// ERROR HANDLERS
+// =====================================================
+
+// Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:');
-  console.error(error);
-  process.exit(1);
+  console.error('\n' + '='.repeat(60));
+  console.error('❌ UNCAUGHT EXCEPTION');
+  console.error('='.repeat(60));
+  console.error('Error:', error.message);
+  console.error('Stack:', error.stack);
+  console.error('='.repeat(60) + '\n');
+  
+  // Try to save state before exiting
+  gracefulShutdown('uncaughtException').finally(() => {
+    process.exit(1);
+  });
 });
 
+// Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise);
+  console.error('\n' + '='.repeat(60));
+  console.error('❌ UNHANDLED PROMISE REJECTION');
+  console.error('='.repeat(60));
   console.error('Reason:', reason);
-  process.exit(1);
+  console.error('Promise:', promise);
+  console.error('='.repeat(60) + '\n');
+  
+  // Try to save state before exiting
+  gracefulShutdown('unhandledRejection').finally(() => {
+    process.exit(1);
+  });
 });
+
+// =====================================================
+// START THE SERVER
+// =====================================================
+
+console.log('\n' + '='.repeat(60));
+console.log('🤖 SHOPIFY + SALESIQ BOT BACKEND');
+console.log('Multi-Tenant AI-Powered E-Commerce Bot');
+console.log('='.repeat(60) + '\n');
+
+startServer();
 
 console.log('✅ Server initialization complete!\n');

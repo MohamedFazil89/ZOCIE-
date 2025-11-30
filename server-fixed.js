@@ -362,74 +362,74 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
     }
 
     case 'browse_deals': {
-  console.log('🛍️ Starting browse_deals action...');
-  
-  const productsData = await shopifyCall(
-    `/products.json?limit=10&status=active`
-  );
+      console.log('🛍️ Starting browse_deals action...');
 
-  console.log('📦 Products API response:', productsData ? 'Success' : 'Failed');
-
-  if (!productsData?.products || productsData.products.length === 0) {
-    console.log('❌ No products found');
-    return {
-      message: "🛍️ No products available right now. Check back soon!",
-      suggestions: ["Help", "Track Order"]
-    };
-  }
-
-  console.log(`✅ Found ${productsData.products.length} products`);
-
-  // 🆕 BUILD TEXT-BASED PRODUCT LIST
-  let productList = `🛍️ **Today's Top Deals**\n\n`;
-  productList += `Found ${Math.min(productsData.products.length, 8)} amazing products:\n\n`;
-
-  const productsToShow = productsData.products.slice(0, 8);
-  
-  for (let i = 0; i < productsToShow.length; i++) {
-    const product = productsToShow[i];
-    const variant = product.variants?.[0];
-    
-    if (!variant) {
-      console.log(`⚠️ Skipping product ${product.title} - no variant`);
-      continue;
-    }
-    
-    const price = variant.price || "0.00";
-    const comparePrice = variant.compare_at_price;
-    const variantId = variant.id;
-
-    // Calculate discount
-    let priceDisplay = `$${price}`;
-    if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
-      const discount = Math.round(
-        ((parseFloat(comparePrice) - parseFloat(price)) / parseFloat(comparePrice)) * 100
+      const productsData = await shopifyCall(
+        `/products.json?limit=10&status=active`
       );
-      priceDisplay = `$${price} 🔥 Save ${discount}%`;
+
+      console.log('📦 Products API response:', productsData ? 'Success' : 'Failed');
+
+      if (!productsData?.products || productsData.products.length === 0) {
+        console.log('❌ No products found');
+        return {
+          message: "🛍️ No products available right now. Check back soon!",
+          suggestions: ["Help", "Track Order"]
+        };
+      }
+
+      console.log(`✅ Found ${productsData.products.length} products`);
+
+      // 🆕 BUILD TEXT-BASED PRODUCT LIST
+      let productList = `🛍️ **Today's Top Deals**\n\n`;
+      productList += `Found ${Math.min(productsData.products.length, 8)} amazing products:\n\n`;
+
+      const productsToShow = productsData.products.slice(0, 8);
+
+      for (let i = 0; i < productsToShow.length; i++) {
+        const product = productsToShow[i];
+        const variant = product.variants?.[0];
+
+        if (!variant) {
+          console.log(`⚠️ Skipping product ${product.title} - no variant`);
+          continue;
+        }
+
+        const price = variant.price || "0.00";
+        const comparePrice = variant.compare_at_price;
+        const variantId = variant.id;
+
+        // Calculate discount
+        let priceDisplay = `$${price}`;
+        if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
+          const discount = Math.round(
+            ((parseFloat(comparePrice) - parseFloat(price)) / parseFloat(comparePrice)) * 100
+          );
+          priceDisplay = `$${price} 🔥 Save ${discount}%`;
+        }
+
+        productList += `${i + 1}. **${product.title}**\n`;
+        productList += `   💰 Price: ${priceDisplay}\n`;
+        productList += `   🔢 ID: \`${variantId}\`\n`;
+        productList += `   📝 To order: "add ${variantId} to cart"\n\n`;
+      }
+
+      productList += `\n💡 **How to Order:**\n`;
+      productList += `Say: "add [ID] to cart"\n`;
+      productList += `Example: "add 42650178125921 to cart"\n`;
+
+      console.log(`📦 Product list built with ${Math.min(productsToShow.length, 8)} products`);
+
+      return {
+        message: productList,
+        suggestions: ["Add to Cart", "Track Order", "Help"],
+        remember: true,
+        data: {
+          productCount: productsData.products.length,
+          lastBrowsed: new Date().toISOString()
+        }
+      };
     }
-
-    productList += `${i + 1}. **${product.title}**\n`;
-    productList += `   💰 Price: ${priceDisplay}\n`;
-    productList += `   🔢 ID: \`${variantId}\`\n`;
-    productList += `   📝 To order: "add ${variantId} to cart"\n\n`;
-  }
-
-  productList += `\n💡 **How to Order:**\n`;
-  productList += `Say: "add [ID] to cart"\n`;
-  productList += `Example: "add 42650178125921 to cart"\n`;
-
-  console.log(`📦 Product list built with ${Math.min(productsToShow.length, 8)} products`);
-
-  return {
-    message: productList,
-    suggestions: ["Add to Cart", "Track Order", "Help"],
-    remember: true,
-    data: { 
-      productCount: productsData.products.length,
-      lastBrowsed: new Date().toISOString()
-    }
-  };
-}
 
 
 
@@ -730,7 +730,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
 function buildSalesIQResponse(actionResult) {
   console.log('\n🔧 Building SalesIQ response...');
-  
+
   const response = {};
 
   if (!actionResult) {
@@ -761,7 +761,7 @@ function buildSalesIQResponse(actionResult) {
     // 🆕 ZOHO SALESIQ 2025 CARDS FORMAT
     if (actionResult.cards && Array.isArray(actionResult.cards)) {
       console.log(`📦 Processing ${actionResult.cards.length} cards for SalesIQ`);
-      
+
       // Transform cards to SalesIQ format
       response.cards = actionResult.cards.map(card => ({
         title: card.title || "",
@@ -774,7 +774,7 @@ function buildSalesIQResponse(actionResult) {
           key: btn.key || ""
         }))
       }));
-      
+
       console.log(`✅ Transformed ${response.cards.length} cards`);
     }
 
@@ -1792,6 +1792,212 @@ app.get("/api/debug/sessions", (req, res) => {
     sessions: sessions
   });
 });
+
+
+// -----------------------------------------------
+app.get('/bot-installer', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Generate Your Store Bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="container mx-auto px-4 py-12">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <h1 class="text-5xl font-bold text-gray-800 mb-4">
+                🤖 Self-Driving Store Bot
+            </h1>
+            <p class="text-xl text-gray-600">
+                Connect your Shopify store. Your bot configures itself. <span class="font-bold">In 2 minutes.</span>
+            </p>
+        </div>
+
+        <!-- Main Card -->
+        <div class="max-w-2xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden">
+            <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-8 text-center">
+                <h2 class="text-3xl font-bold text-white mb-2">Zoho Commerce Intelligence Engine</h2>
+                <p class="text-blue-100">Just click connect. We handle the rest.</p>
+            </div>
+
+            <div class="p-8">
+                <!-- Step 1: Connect Store -->
+                <div id="step1" class="step-content">
+                    <div class="text-center mb-8">
+                        <div class="text-6xl mb-4">🔗</div>
+                        <h3 class="text-2xl font-bold text-gray-800 mb-2">Connect Your Shopify Store</h3>
+                        <p class="text-gray-600">Securely connect using Shopify OAuth</p>
+                    </div>
+
+                    <div class="space-y-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                Your Shopify Store Domain
+                            </label>
+                            <div class="flex">
+                                <input 
+                                    type="text" 
+                                    id="shopDomain"
+                                    placeholder="your-store"
+                                    class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-l-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition"
+                                />
+                                <span class="inline-flex items-center px-4 py-3 bg-gray-100 border-2 border-l-0 border-gray-300 rounded-r-lg text-gray-600">
+                                    .myshopify.com
+                                </span>
+                            </div>
+                            <p class="mt-2 text-sm text-gray-500">
+                                Example: fractix.myshopify.com → Enter "fractix"
+                            </p>
+                        </div>
+
+                        <button 
+                            onclick="connectShopify()"
+                            class="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-4 rounded-lg font-semibold text-lg hover:shadow-xl transform hover:-translate-y-1 transition duration-200 flex items-center justify-center space-x-2"
+                        >
+                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M15.8 2.4c-.9-.1-1.8 0-2.5.3-.6.2-1.2.6-1.6 1.1-.3-.4-.7-.7-1.2-.9-.8-.3-1.7-.4-2.6-.2-.4.1-.9.3-1.3.6-.4.3-.8.7-1.1 1.2-.3.5-.5 1.1-.6 1.7-.1.6 0 1.3.2 1.9.2.6.5 1.1.9 1.6.4.4.9.8 1.5 1 .5.2 1.1.3 1.7.3h.3c.5 0 1-.1 1.5-.3.5-.2.9-.5 1.3-.9.3.4.7.7 1.2.9.8.3 1.7.4 2.6.2.4-.1.9-.3 1.3-.6.4-.3.8-.7 1.1-1.2.3-.5.5-1.1.6-1.7.1-.6 0-1.3-.2-1.9-.2-.6-.5-1.1-.9-1.6-.4-.4-.9-.8-1.5-1-.4-.2-.9-.3-1.4-.4z"/>
+                            </svg>
+                            <span>Connect to Shopify</span>
+                        </button>
+
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <div class="flex items-start">
+                                <svg class="w-5 h-5 text-blue-600 mr-3 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                                </svg>
+                                <div class="text-sm text-blue-800">
+                                    <p class="font-semibold mb-1">Secure OAuth Connection</p>
+                                    <p>We'll redirect you to Shopify to securely authorize access. We only request the minimum permissions needed.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Generating -->
+                <div id="step2" class="step-content hidden">
+                    <div class="text-center py-12">
+                        <div class="inline-block">
+                            <div class="animate-spin rounded-full h-24 w-24 border-b-4 border-blue-600"></div>
+                        </div>
+                        <h2 class="text-2xl font-bold text-gray-800 mt-8 mb-4">
+                            🔄 Connecting to Shopify...
+                        </h2>
+                        <p class="text-gray-600">Please authorize access in the Shopify window</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features Section -->
+        <div class="mt-16 grid md:grid-cols-4 gap-8 max-w-6xl mx-auto">
+            <div class="bg-white p-6 rounded-xl shadow-lg text-center">
+                <div class="text-4xl mb-4">🔐</div>
+                <h3 class="font-bold text-gray-800 mb-2">Secure OAuth</h3>
+                <p class="text-gray-600 text-sm">Industry-standard Shopify authentication</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-lg text-center">
+                <div class="text-4xl mb-4">⚡</div>
+                <h3 class="font-bold text-gray-800 mb-2">2-Min Setup</h3>
+                <p class="text-gray-600 text-sm">From click to fully functional bot</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-lg text-center">
+                <div class="text-4xl mb-4">🤖</div>
+                <h3 class="font-bold text-gray-800 mb-2">Auto-Generated</h3>
+                <p class="text-gray-600 text-sm">Bot analyzes and configures itself</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-lg text-center">
+                <div class="text-4xl mb-4">🔧</div>
+                <h3 class="font-bold text-gray-800 mb-2">Zero Config</h3>
+                <p class="text-gray-600 text-sm">No manual plugin creation needed</p>
+            </div>
+        </div>
+
+        <!-- What Happens Next -->
+        <div class="mt-16 max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-8">
+            <h3 class="text-2xl font-bold text-gray-800 mb-6 text-center">What Happens After You Connect?</h3>
+            <div class="grid md:grid-cols-3 gap-6">
+                <div class="text-center">
+                    <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span class="text-2xl font-bold text-blue-600">1</span>
+                    </div>
+                    <h4 class="font-bold text-gray-800 mb-2">We Analyze Your Store</h4>
+                    <p class="text-sm text-gray-600">Fetch products, categories, variants, and inventory</p>
+                </div>
+                <div class="text-center">
+                    <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span class="text-2xl font-bold text-blue-600">2</span>
+                    </div>
+                    <h4 class="font-bold text-gray-800 mb-2">Generate Custom Bot</h4>
+                    <p class="text-sm text-gray-600">Create Deluge script with all features configured</p>
+                </div>
+                <div class="text-center">
+                    <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span class="text-2xl font-bold text-blue-600">3</span>
+                    </div>
+                    <h4 class="font-bold text-gray-800 mb-2">Ready to Deploy</h4>
+                    <p class="text-sm text-gray-600">Download script and deploy to SalesIQ in one click</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://zocie.onrender.com';
+
+        async function connectShopify() {
+            const shopInput = document.getElementById('shopDomain').value.trim();
+            
+            if (!shopInput) {
+                alert('Please enter your shop domain');
+                return;
+            }
+
+            // Normalize shop domain
+            let shop = shopInput.replace('.myshopify.com', '');
+            shop = shop + '.myshopify.com';
+
+            // Show loading
+            document.getElementById('step1').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+
+            try {
+                // Get OAuth URL from backend
+                const response = await fetch(BACKEND_URL + '/api/shopify/auth/start?shop=' + shop);
+                const data = await response.json();
+
+                if (data.authUrl) {
+                    // Redirect to Shopify OAuth
+                    window.location.href = data.authUrl;
+                } else {
+                    throw new Error('Failed to initiate OAuth');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to connect to Shopify: ' + error.message);
+                
+                // Show step 1 again
+                document.getElementById('step2').classList.add('hidden');
+                document.getElementById('step1').classList.remove('hidden');
+            }
+        }
+
+        // Handle Enter key
+        document.getElementById('shopDomain').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                connectShopify();
+            }
+        });
+    </script>
+</body>
+</html>
+`);
+});
+
+// -----------------------------------------------
 
 // =====================================================
 // SERVER INITIALIZATION - FIXED

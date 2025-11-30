@@ -1395,33 +1395,249 @@ app.get("/api/debug/businesses", (req, res) => {
         businesses: businesses
     });
 });
-
 // =====================================================
-// DEBUG ENDPOINT - Get business sessions
+// MULTI-TENANT ZOBOT WEBHOOK (WITH DEBUGGING)
 // =====================================================
 
-app.get("/api/debug/sessions/:businessId", (req, res) => {
+app.post("/api/zobot/:businessId", async (req, res) => {
+  try {
     const { businessId } = req.params;
+    
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`📨 WEBHOOK REQUEST RECEIVED`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`Business ID: ${businessId}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    console.log(`Request Body:`, JSON.stringify(req.body, null, 2));
+    console.log(`${'='.repeat(60)}\n`);
 
-    const sessions = [];
-    for (const [key, memory] of userSessions.entries()) {
-        if (key.startsWith(businessId)) {
-            sessions.push({
-                userId: memory.userId,
-                messageCount: memory.history.length,
-                context: memory.context,
-                lastActivity: memory.history[memory.history.length - 1]?.timestamp
-            });
-        }
+    // ✅ LOAD BUSINESS DATA
+    const business = await getBusinessData(businessId);
+    
+    if (!business) {
+      console.error(`❌ Business not found: ${businessId}`);
+      return res.json({
+        action: "reply",
+        replies: ["Sorry, bot configuration not found. Please reconnect your store."]
+      });
     }
 
+    console.log(`✅ Business found: ${business.shopName}`);
+
+    const { adminToken, shopDomain } = business;
+    
+    // ✅ EXTRACT MESSAGE DATA - HANDLE MULTIPLE FORMATS
+    let message = null;
+    let visitor = null;
+    let operation = "message";
+
+    // Format 1: Direct message object (most common)
+    if (req.body.message && req.body.message.text) {
+      message = req.body.message;
+      visitor = req.body.visitor || {};
+      operation = req.body.operation || "message";
+    }
+    // Format 2: Message in different structure
+    else if (req.body.text) {
+      message = { text: req.body.text };
+      visitor = req.body.visitor || {};
+    }
+    // Format 3: Session data
+    else if (req.body.session) {
+      message = { text: req.body.session.message || req.body.session.text || "" };
+      visitor = req.body.session.visitor || {};
+    }
+    else {
+      console.error(`❌ No message found in request body`);
+      console.error(`Available keys:`, Object.keys(req.body));
+      return res.json({
+        action: "reply",
+        replies: ["I couldn't understand your message. Please try again."]
+      });
+    }
+
+    if (!message || !message.text) {
+      console.error(`❌ Message text is empty`);
+      return res.json({
+        action: "reply",
+        replies: ["Please send a message."]
+      });
+    }
+
+    console.log(`📝 Message received: "${message.text}"`);
+    console.log(`👤 Visitor:`, visitor);
+
+    const userId = visitor?.email || visitor?.id || visitor?.name || "anonymous";
+    console.log(`🆔 User ID: ${userId}`);
+
+    // ✅ GET OR CREATE CONVERSATION MEMORY
+    const memoryKey = `${businessId}_${userId}`;
+    if (!userSessions.has(memoryKey)) {
+      userSessions.set(memoryKey, new ConversationMemory(userId));
+      console.log(`✨ New conversation session created`);
+    }
+    const memory = userSessions.get(memoryKey);
+    console.log(`💾 Memory sessions for this business: ${Array.from(userSessions.keys()).filter(k => k.startsWith(businessId)).length}`);
+
+    // ✅ DETECT INTENT
+    console.log(`\n🧠 INTENT DETECTION`);
+    const { intent, confidence } = await detectIntent(message.text);
+    console.log(`Intent: ${intent}`);
+    console.log(`Confidence: ${(confidence * 100).toFixed(1)}%`);
+    
+    memory.addMessage('user', message.text, { intent });
+
+    // ✅ GET CONTEXT FROM MEMORY
+    const context = memory.getContext();
+    console.log(`\n📋 CONTEXT`);
+    console.log(`Email in context: ${context.email || 'Not set'}`);
+    console.log(`Previous actions: ${context.previousActions.length}`);
+
+    // ✅ EXECUTE ACTION USING BUSINESS-SPECIFIC DATA
+    console.log(`\n⚙️ EXECUTING ACTION`);
+    console.log(`Shop Domain: ${shopDomain}`);
+    
+    const actionResult = await executeAction(
+      intent,
+      message.text,
+      context,
+      shopDomain,
+      adminToken
+    );
+
+    console.log(`Action Result:`, JSON.stringify(actionResult, null, 2));
+
+    // ✅ BUILD SALESIQ RESPONSE
+    const response = buildSalesIQResponse(actionResult);
+    console.log(`\n📤 SALESIQ RESPONSE`);
+    console.log(`Response:`, JSON.stringify(response, null, 2));
+    
+    // ✅ REMEMBER FOR NEXT INTERACTION
+    memory.addMessage('bot', actionResult.message);
+    
+    if (actionResult.remember) {
+      memory.remember(intent, actionResult.data);
+      console.log(`💾 Saved to memory:`, actionResult.data);
+    }
+
+    console.log(`\n✅ Response sent for intent: ${intent}`);
+    console.log(`${'='.repeat(60)}\n`);
+    
+    res.json(response);
+
+  } catch (error) {
+    console.error(`\n${'='.repeat(60)}`);
+    console.error(`❌ ZOBOT WEBHOOK ERROR`);
+    console.error(`Error Message: ${error.message}`);
+    console.error(`Stack Trace:`, error.stack);
+    console.error(`${'='.repeat(60)}\n`);
+    
     res.json({
-        businessId: businessId,
-        activeUsers: sessions.length,
-        sessions: sessions
+      action: "reply",
+      replies: [
+        `⚠️ Error: ${error.message}\n\nPlease try again or contact support.`,
+        "Available commands: Browse Deals, Track Order, Add to Cart, Buy Now, Return Order"
+      ],
+      suggestions: ["Help", "Browse Deals", "Track Order"]
     });
+  }
 });
 
+// =====================================================
+// WEBHOOK TEST ENDPOINT (For manual testing)
+// =====================================================
+
+app.post("/api/zobot/:businessId/test", async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    
+    // Simulate SalesIQ webhook payload
+    const testPayload = {
+      message: {
+        text: req.body.text || "show me deals"
+      },
+      visitor: {
+        email: req.body.email || "test@example.com",
+        id: "test-visitor-123",
+        name: "Test User"
+      },
+      operation: "message"
+    };
+
+    console.log(`\n🧪 TEST WEBHOOK CALLED`);
+    console.log(`Business ID: ${businessId}`);
+    console.log(`Test Payload:`, JSON.stringify(testPayload, null, 2));
+
+    // Call the webhook handler
+    const mockReq = {
+      body: testPayload,
+      params: { businessId }
+    };
+
+    const mockRes = {
+      json: (data) => {
+        console.log(`Test Response:`, JSON.stringify(data, null, 2));
+        return data;
+      }
+    };
+
+    // Handle the request
+    await new Promise((resolve) => {
+      const originalJson = mockRes.json;
+      mockRes.json = function(data) {
+        res.json(data);
+        resolve();
+      };
+
+      // Simulate the webhook call
+      const testReq = {
+        body: testPayload,
+        params: { businessId }
+      };
+
+      // Create a handler and call it
+      const handler = async (req, res) => {
+        const { businessId } = req.params;
+        const business = await getBusinessData(businessId);
+        
+        if (!business) {
+          return res.json({ action: "reply", replies: ["Business not found"] });
+        }
+
+        const { adminToken, shopDomain } = business;
+        const message = req.body.message;
+        const visitor = req.body.visitor || {};
+        const userId = visitor.email || visitor.id || "test";
+        
+        const memoryKey = `${businessId}_${userId}`;
+        if (!userSessions.has(memoryKey)) {
+          userSessions.set(memoryKey, new ConversationMemory(userId));
+        }
+        const memory = userSessions.get(memoryKey);
+        
+        const { intent } = await detectIntent(message.text);
+        memory.addMessage('user', message.text, { intent });
+        
+        const context = memory.getContext();
+        const actionResult = await executeAction(intent, message.text, context, shopDomain, adminToken);
+        const response = buildSalesIQResponse(actionResult);
+        
+        memory.addMessage('bot', actionResult.message);
+        
+        res.json(response);
+      };
+
+      handler(testReq, res);
+    });
+
+  } catch (error) {
+    console.error(`❌ Test webhook error:`, error);
+    res.status(500).json({
+      error: error.message,
+      type: "test_error"
+    });
+  }
+});
 // =====================================================
 // ERROR HANDLER
 // =====================================================

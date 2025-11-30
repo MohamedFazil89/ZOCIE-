@@ -212,30 +212,47 @@ async function shopifyApiCall(shopDomain, adminToken, endpoint, method = "GET", 
 // INTENT DETECTION (NLP)
 // =====================================================
 async function detectIntent(userMessage) {
-    const msg = userMessage.toLowerCase();
-
-    const intents = {
-        // 🆕 ADD THIS - Greeting detection
-        greeting: {
-            patterns: /^(hi|hey|hello|yo|sup|hola|greetings|good\s+(morning|afternoon|evening)|remember\s+me|its\s+me|im\s+back)/i,
-            confidence: 0.95
-        },
-
-        trackorder: { patterns: /track|status|where|delivery|order|shipping/, confidence: 0.95 },
-        browsedeals: { patterns: /deal|product|browse|show|what.*sell|what.*have|catalog|collection/, confidence: 0.9 },
-        addcart: { patterns: /add.*cart|add to cart|add this|want to buy|interested|interested in/, confidence: 0.9 },
-        buynow: { patterns: /buy now|checkout|payment|purchase|price|cost|how much/, confidence: 0.85 },
-        returnorder: { patterns: /return|refund|money back|cancel|issue|wrong|damaged|not good/, confidence: 0.9 },
-        productinfo: { patterns: /tell|about|info|details|describe|specifications|spec/, confidence: 0.8 }
-    };
-
-    for (const [intent, { patterns, confidence }] of Object.entries(intents)) {
-        if (patterns.test(msg)) {
-            return { intent, confidence };
-        }
+  const msg = userMessage.toLowerCase();
+  
+  const intents = {
+    // ✅ Match exactly what executeAction() expects
+    greeting: { 
+      patterns: /^(hi|hey|hello|yo|sup|hola|greetings|good\s+(morning|afternoon|evening)|remember\s+me|its\s+me|im\s+back)\b/i, 
+      confidence: 0.95 
+    },
+    track_order: {  // ✅ Changed from 'trackorder'
+      patterns: /track|status|where|delivery|order|shipping/, 
+      confidence: 0.95 
+    },
+    browse_deals: {  // ✅ Changed from 'browsedeals'
+      patterns: /deal|product|browse|show|what.*sell|what.*have|catalog|collection/, 
+      confidence: 0.9 
+    },
+    add_cart: {  // ✅ Changed from 'addcart'
+      patterns: /add.*cart|add to cart|add this|want to buy|interested|interested in/, 
+      confidence: 0.9 
+    },
+    buy_now: {  // ✅ Changed from 'buynow'
+      patterns: /buy now|checkout|payment|purchase|price|cost|how much/, 
+      confidence: 0.85 
+    },
+    return_order: {  // ✅ Changed from 'returnorder'
+      patterns: /return|refund|money back|cancel|issue|wrong|damaged|not good/, 
+      confidence: 0.9 
+    },
+    product_info: {  // ✅ Changed from 'productinfo'
+      patterns: /tell|about|info|details|describe|specifications|spec/, 
+      confidence: 0.8 
     }
-
-    return { intent: 'generalquery', confidence: 0.5 };
+  };
+  
+  for (const [intent, { patterns, confidence }] of Object.entries(intents)) {
+    if (patterns.test(msg)) {
+      return { intent, confidence };
+    }
+  }
+  
+  return { intent: 'general_query', confidence: 0.5 };  // ✅ Changed default too
 }
 
 // =====================================================
@@ -275,181 +292,181 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
                 };
             }
         case 'track_order': {
-    // 🔍 Step 1: Try to get email from context first
-    let email = context.email;
-    
-    console.log('🔎 Checking for email...');
-    console.log('  📋 Context email:', email || 'Not found');
-    
-    // 🔍 Step 2: If no email in context, try to extract from current message
-    if (!email) {
-        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
-        if (emailMatch) {
-            email = emailMatch[0];
-            console.log('  ✉️ Extracted from message:', email);
-            
-            // 🆕 IMPORTANT: Save extracted email to context for future use
-            context.email = email;
-        }
-    }
-    
-    // 🔍 Step 3: Only ask for email if still not found after all checks
-    if (!email) {
-        console.log('  ❌ No email found - asking user');
-        return {
-            needsInfo: true,
-            fieldNeeded: "email",
-            question: "📧 What's your email address? I'll use it to find your order.",
-            inputType: "email",
-            message: "Email required to track your order",
-            suggestions: ["Help", "Browse Products"]
-        };
-    }
-    
-    console.log('  ✅ Using email:', email);
-    console.log('🛍️ Fetching orders from Shopify...');
-    
-    // 🔍 Step 4: Fetch orders from Shopify
-    const ordersData = await shopifyCall(
-        `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=5`
-    );
-    
-    // 🔍 Step 5: Handle no orders found
-    if (!ordersData?.orders || ordersData.orders.length === 0) {
-        console.log('  ❌ No orders found for:', email);
-        return {
-            message: `📭 **No Orders Found**\n\n` +
-                `I couldn't find any orders for **${email}**.\n\n` +
-                `Please check:\n` +
-                `• Email spelling is correct\n` +
-                `• You've placed an order before\n` +
-                `• Order was placed on this store`,
-            remember: true,
-            data: { email }, // Remember email even if no orders
-            suggestions: ["Browse Products", "Try Another Email", "Help"]
-        };
-    }
-    
-    console.log(`  ✅ Found ${ordersData.orders.length} order(s)`);
-    
-    // 🔍 Step 6: Process the most recent order
-    const order = ordersData.orders[0];
-    
-    // Format fulfillment status with emoji
-    let statusEmoji = '📦';
-    let statusText = order.fulfillment_status || 'Unfulfilled';
-    
-    if (statusText === 'fulfilled') {
-        statusEmoji = '✅';
-        statusText = 'Delivered';
-    } else if (statusText === 'partial') {
-        statusEmoji = '📮';
-        statusText = 'Partially Shipped';
-    } else if (statusText === null || statusText === 'Unfulfilled') {
-        statusEmoji = '⏳';
-        statusText = 'Processing';
-    }
-    
-    // Format financial status
-    let paymentEmoji = '💳';
-    let paymentStatus = order.financial_status || 'pending';
-    
-    if (paymentStatus === 'paid') {
-        paymentEmoji = '✅';
-        paymentStatus = 'Paid';
-    } else if (paymentStatus === 'pending') {
-        paymentEmoji = '⏳';
-        paymentStatus = 'Payment Pending';
-    } else if (paymentStatus === 'refunded') {
-        paymentEmoji = '🔄';
-        paymentStatus = 'Refunded';
-    }
-    
-    // Build item list
-    const itemsList = order.line_items
-        ?.slice(0, 3) // Show max 3 items
-        .map(item => `  • ${item.quantity}x ${item.name}`)
-        .join('\n') || '  • Items unavailable';
-    
-    const moreItems = order.line_items?.length > 3 
-        ? `\n  • ...and ${order.line_items.length - 3} more item(s)` 
-        : '';
-    
-    // Calculate days since order
-    const orderDate = new Date(order.created_at);
-    const daysSince = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
-    const daysText = daysSince === 0 ? 'Today' : 
-                     daysSince === 1 ? 'Yesterday' : 
-                     `${daysSince} days ago`;
-    
-    // Build response message
-    let message = `${statusEmoji} **Order #${order.name}**\n\n` +
-        `**Status:** ${statusText}\n` +
-        `**Payment:** ${paymentEmoji} ${paymentStatus}\n` +
-        `**Total:** ${order.total_price} ${order.currency}\n` +
-        `**Placed:** ${orderDate.toLocaleDateString()} (${daysText})\n\n` +
-        `**Items:**\n${itemsList}${moreItems}`;
-    
-    // Add tracking info if available
-    if (order.fulfillments && order.fulfillments.length > 0) {
-        const tracking = order.fulfillments[0];
-        if (tracking.tracking_number) {
-            message += `\n\n📍 **Tracking:** ${tracking.tracking_number}`;
-            if (tracking.tracking_company) {
-                message += ` (${tracking.tracking_company})`;
+            // 🔍 Step 1: Try to get email from context first
+            let email = context.email;
+
+            console.log('🔎 Checking for email...');
+            console.log('  📋 Context email:', email || 'Not found');
+
+            // 🔍 Step 2: If no email in context, try to extract from current message
+            if (!email) {
+                const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
+                if (emailMatch) {
+                    email = emailMatch[0];
+                    console.log('  ✉️ Extracted from message:', email);
+
+                    // 🆕 IMPORTANT: Save extracted email to context for future use
+                    context.email = email;
+                }
             }
+
+            // 🔍 Step 3: Only ask for email if still not found after all checks
+            if (!email) {
+                console.log('  ❌ No email found - asking user');
+                return {
+                    needsInfo: true,
+                    fieldNeeded: "email",
+                    question: "📧 What's your email address? I'll use it to find your order.",
+                    inputType: "email",
+                    message: "Email required to track your order",
+                    suggestions: ["Help", "Browse Products"]
+                };
+            }
+
+            console.log('  ✅ Using email:', email);
+            console.log('🛍️ Fetching orders from Shopify...');
+
+            // 🔍 Step 4: Fetch orders from Shopify
+            const ordersData = await shopifyCall(
+                `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=5`
+            );
+
+            // 🔍 Step 5: Handle no orders found
+            if (!ordersData?.orders || ordersData.orders.length === 0) {
+                console.log('  ❌ No orders found for:', email);
+                return {
+                    message: `📭 **No Orders Found**\n\n` +
+                        `I couldn't find any orders for **${email}**.\n\n` +
+                        `Please check:\n` +
+                        `• Email spelling is correct\n` +
+                        `• You've placed an order before\n` +
+                        `• Order was placed on this store`,
+                    remember: true,
+                    data: { email }, // Remember email even if no orders
+                    suggestions: ["Browse Products", "Try Another Email", "Help"]
+                };
+            }
+
+            console.log(`  ✅ Found ${ordersData.orders.length} order(s)`);
+
+            // 🔍 Step 6: Process the most recent order
+            const order = ordersData.orders[0];
+
+            // Format fulfillment status with emoji
+            let statusEmoji = '📦';
+            let statusText = order.fulfillment_status || 'Unfulfilled';
+
+            if (statusText === 'fulfilled') {
+                statusEmoji = '✅';
+                statusText = 'Delivered';
+            } else if (statusText === 'partial') {
+                statusEmoji = '📮';
+                statusText = 'Partially Shipped';
+            } else if (statusText === null || statusText === 'Unfulfilled') {
+                statusEmoji = '⏳';
+                statusText = 'Processing';
+            }
+
+            // Format financial status
+            let paymentEmoji = '💳';
+            let paymentStatus = order.financial_status || 'pending';
+
+            if (paymentStatus === 'paid') {
+                paymentEmoji = '✅';
+                paymentStatus = 'Paid';
+            } else if (paymentStatus === 'pending') {
+                paymentEmoji = '⏳';
+                paymentStatus = 'Payment Pending';
+            } else if (paymentStatus === 'refunded') {
+                paymentEmoji = '🔄';
+                paymentStatus = 'Refunded';
+            }
+
+            // Build item list
+            const itemsList = order.line_items
+                ?.slice(0, 3) // Show max 3 items
+                .map(item => `  • ${item.quantity}x ${item.name}`)
+                .join('\n') || '  • Items unavailable';
+
+            const moreItems = order.line_items?.length > 3
+                ? `\n  • ...and ${order.line_items.length - 3} more item(s)`
+                : '';
+
+            // Calculate days since order
+            const orderDate = new Date(order.created_at);
+            const daysSince = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
+            const daysText = daysSince === 0 ? 'Today' :
+                daysSince === 1 ? 'Yesterday' :
+                    `${daysSince} days ago`;
+
+            // Build response message
+            let message = `${statusEmoji} **Order #${order.name}**\n\n` +
+                `**Status:** ${statusText}\n` +
+                `**Payment:** ${paymentEmoji} ${paymentStatus}\n` +
+                `**Total:** ${order.total_price} ${order.currency}\n` +
+                `**Placed:** ${orderDate.toLocaleDateString()} (${daysText})\n\n` +
+                `**Items:**\n${itemsList}${moreItems}`;
+
+            // Add tracking info if available
+            if (order.fulfillments && order.fulfillments.length > 0) {
+                const tracking = order.fulfillments[0];
+                if (tracking.tracking_number) {
+                    message += `\n\n📍 **Tracking:** ${tracking.tracking_number}`;
+                    if (tracking.tracking_company) {
+                        message += ` (${tracking.tracking_company})`;
+                    }
+                }
+            }
+
+            // Build buttons array
+            const buttons = [];
+
+            // Add tracking button if order status URL exists
+            if (order.order_status_url) {
+                buttons.push({
+                    label: "🔍 Track Shipment",
+                    type: "url",
+                    value: order.order_status_url
+                });
+            }
+
+            // Add view details button (if you have order details page)
+            if (order.id) {
+                buttons.push({
+                    label: "📄 View Full Details",
+                    type: "url",
+                    value: order.order_status_url || `https://${shopDomain}/account/orders/${order.token || order.id}`
+                });
+            }
+
+            // Build suggestions based on order status
+            let suggestions = ["Browse Products", "Help"];
+
+            if (ordersData.orders.length > 1) {
+                suggestions.unshift("View Other Orders");
+            }
+
+            // Only show "Return Order" if delivered and within return window (e.g., 30 days)
+            if (statusText === 'Delivered' && daysSince <= 30) {
+                suggestions.unshift("Return Order");
+            }
+
+            console.log('  ✅ Order details sent successfully');
+
+            return {
+                message: message,
+                remember: true,
+                data: {
+                    email,
+                    orderId: order.id,
+                    orderName: order.name,
+                    orderStatus: order.fulfillment_status,
+                    lastOrderDate: order.created_at
+                },
+                buttons: buttons.length > 0 ? buttons : undefined,
+                suggestions: suggestions
+            };
         }
-    }
-    
-    // Build buttons array
-    const buttons = [];
-    
-    // Add tracking button if order status URL exists
-    if (order.order_status_url) {
-        buttons.push({
-            label: "🔍 Track Shipment",
-            type: "url",
-            value: order.order_status_url
-        });
-    }
-    
-    // Add view details button (if you have order details page)
-    if (order.id) {
-        buttons.push({
-            label: "📄 View Full Details",
-            type: "url",
-            value: order.order_status_url || `https://${shopDomain}/account/orders/${order.token || order.id}`
-        });
-    }
-    
-    // Build suggestions based on order status
-    let suggestions = ["Browse Products", "Help"];
-    
-    if (ordersData.orders.length > 1) {
-        suggestions.unshift("View Other Orders");
-    }
-    
-    // Only show "Return Order" if delivered and within return window (e.g., 30 days)
-    if (statusText === 'Delivered' && daysSince <= 30) {
-        suggestions.unshift("Return Order");
-    }
-    
-    console.log('  ✅ Order details sent successfully');
-    
-    return {
-        message: message,
-        remember: true,
-        data: { 
-            email, 
-            orderId: order.id,
-            orderName: order.name,
-            orderStatus: order.fulfillment_status,
-            lastOrderDate: order.created_at
-        },
-        buttons: buttons.length > 0 ? buttons : undefined,
-        suggestions: suggestions
-    };
-}
 
 
         case 'browse_deals': {

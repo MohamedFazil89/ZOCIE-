@@ -362,84 +362,75 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
     }
 
     case 'browse_deals': {
-      console.log('🛍️ Starting browse_deals action...');
+  console.log('🛍️ Starting browse_deals action...');
+  
+  const productsData = await shopifyCall(
+    `/products.json?limit=10&status=active`
+  );
 
-      const productsData = await shopifyCall(
-        `/products.json?limit=10&status=active`
-      );
+  console.log('📦 Products API response:', productsData ? 'Success' : 'Failed');
 
-      console.log('📦 Products API response:', productsData ? 'Success' : 'Failed');
+  if (!productsData?.products || productsData.products.length === 0) {
+    console.log('❌ No products found');
+    return {
+      message: "🛍️ No products available right now. Check back soon!",
+      suggestions: ["Help", "Track Order"]
+    };
+  }
 
-      if (!productsData?.products || productsData.products.length === 0) {
-        console.log('❌ No products found');
-        return {
-          message: "🛍️ No products available right now. Check back soon!",
-          suggestions: ["Help", "Track Order"]
-        };
-      }
+  console.log(`✅ Found ${productsData.products.length} products`);
 
-      console.log(`✅ Found ${productsData.products.length} products`);
+  // 🆕 BUILD TEXT-BASED PRODUCT LIST
+  let productList = `🛍️ **Today's Top Deals**\n\n`;
+  productList += `Found ${Math.min(productsData.products.length, 8)} amazing products:\n\n`;
 
-      // 🆕 BUILD CARDS - 2025 FORMAT
-      const cards = [];
-
-      for (let i = 0; i < Math.min(productsData.products.length, 8); i++) {
-        const product = productsData.products[i];
-        const variant = product.variants?.[0];
-
-        if (!variant) {
-          console.log(`⚠️ Skipping product ${product.title} - no variant`);
-          continue;
-        }
-
-        const price = variant.price || "0.00";
-        const comparePrice = variant.compare_at_price;
-        const variantId = variant.id;
-        const image = product.images?.[0]?.src || "";
-
-        // Calculate discount
-        let priceDisplay = `$${price}`;
-        if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
-          const discount = Math.round(((parseFloat(comparePrice) - parseFloat(price)) / parseFloat(comparePrice)) * 100);
-          priceDisplay = `$${price} • Save ${discount}%`;
-        }
-
-        const card = {
-          title: product.title,
-          subtitle: priceDisplay,
-          image: image,
-          buttons: [
-            {
-              label: "🛒 Add to Cart",
-              type: "invoke_function",
-              key: "add_to_cart",
-              value: variantId.toString()
-            },
-            {
-              label: "View Details",
-              type: "url",
-              value: `https://${shopDomain}/products/${product.handle}`
-            }
-          ]
-        };
-
-        cards.push(card);
-        console.log(`✅ Added card: ${product.title}`);
-      }
-
-      console.log(`📦 Total cards created: ${cards.length}`);
-
-      return {
-        message: `🛍️ Today's Top Deals\n\nFound ${cards.length} amazing products for you!`,
-        cards: cards,
-        suggestions: ["Track Order", "Add to Cart", "Help"],
-        remember: true,
-        data: {
-          productCount: productsData.products.length,
-          lastBrowsed: new Date().toISOString()
-        }
-      };
+  const productsToShow = productsData.products.slice(0, 8);
+  
+  for (let i = 0; i < productsToShow.length; i++) {
+    const product = productsToShow[i];
+    const variant = product.variants?.[0];
+    
+    if (!variant) {
+      console.log(`⚠️ Skipping product ${product.title} - no variant`);
+      continue;
     }
+    
+    const price = variant.price || "0.00";
+    const comparePrice = variant.compare_at_price;
+    const variantId = variant.id;
+
+    // Calculate discount
+    let priceDisplay = `$${price}`;
+    if (comparePrice && parseFloat(comparePrice) > parseFloat(price)) {
+      const discount = Math.round(
+        ((parseFloat(comparePrice) - parseFloat(price)) / parseFloat(comparePrice)) * 100
+      );
+      priceDisplay = `$${price} 🔥 Save ${discount}%`;
+    }
+
+    productList += `${i + 1}. **${product.title}**\n`;
+    productList += `   💰 Price: ${priceDisplay}\n`;
+    productList += `   🔢 ID: \`${variantId}\`\n`;
+    productList += `   📝 To order: "add ${variantId} to cart"\n\n`;
+  }
+
+  productList += `\n💡 **How to Order:**\n`;
+  productList += `Say: "add [ID] to cart"\n`;
+  productList += `Example: "add 42650178125921 to cart"\n`;
+
+  console.log(`📦 Product list built with ${Math.min(productsToShow.length, 8)} products`);
+
+  return {
+    message: productList,
+    suggestions: ["Add to Cart", "Track Order", "Help"],
+    remember: true,
+    data: { 
+      productCount: productsData.products.length,
+      lastBrowsed: new Date().toISOString()
+    }
+  };
+}
+
 
 
 

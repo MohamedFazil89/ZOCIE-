@@ -52,6 +52,9 @@ const userSessions = new Map(); // "businessId_userId" → conversation memory
 // =====================================================
 // CONVERSATION MEMORY CLASS - FIXED
 // =====================================================
+// =====================================================
+// CONVERSATION MEMORY CLASS - FIXED
+// =====================================================
 
 class ConversationMemory {
   constructor(businessId, userId) {
@@ -60,6 +63,7 @@ class ConversationMemory {
     this.messages = [];
     this.context = {
       email: null,
+      userName: null,
       previousActions: [],
       lastIntent: null,
       userData: {}
@@ -76,10 +80,14 @@ class ConversationMemory {
     });
   }
 
-  remember(key, value) {
-    this.context[key] = value;
-    if (key === 'email') {
-      this.context.email = value;
+  // 🆕 FIXED: Accept both object and key-value
+  remember(keyOrData, value) {
+    // If passing an object, merge it
+    if (typeof keyOrData === 'object' && keyOrData !== null && value === undefined) {
+      this.context = { ...this.context, ...keyOrData };
+    } else {
+      // If passing key-value pair
+      this.context[keyOrData] = value;
     }
   }
 
@@ -98,6 +106,7 @@ class ConversationMemory {
         messages: this.messages,
         context: this.context
       });
+      console.log(`💾 Memory saved for ${this.userId}`);
     } catch (error) {
       console.error(`Error saving conversation: ${error.message}`);
     }
@@ -240,8 +249,11 @@ async function detectIntent(userMessage) {
 // =====================================================
 
 // FIXED: Made truly async, all shopifyCall operations awaited
+// =====================================================
+// ACTION EXECUTION (Business Logic) - FIXED
+// =====================================================
 
-async function executeAction(intent, userMessage, context, shopDomain, adminToken) {
+async function executeAction(intent, userMessage, context, shopDomain, adminToken, memory) {
   if (!shopDomain || !adminToken) {
     console.error('❌ Missing shop or token');
     return { message: "Configuration error. Please reconnect.", suggestions: ["Help"] };
@@ -252,12 +264,17 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
   switch (intent) {
     case 'track_order': {
-      let email = context.email;
-
+      let email = context.email; // ✅ Check context first
+      
+      // If no email in context, try to extract from message
       if (!email) {
-        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+/);
+        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
         if (emailMatch) {
           email = emailMatch[0];
+          // 🆕 SAVE extracted email to memory immediately
+          memory.remember('email', email);
+          await memory.saveToFile();
+          console.log(`📧 Extracted and saved email: ${email}`);
         }
       }
 
@@ -276,14 +293,14 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
       if (!ordersData?.orders || ordersData.orders.length === 0) {
         return {
-          message: `No orders found for ${email}. Please check your email address.`,
+          message: `📭 No orders found for ${email}.\n\nPlease check your email address or browse our products!`,
           suggestions: ["Browse Products", "Help"]
         };
       }
 
       const order = ordersData.orders[0];
       return {
-        message: `📦 **Order #${order.name}**\nStatus: ${order.fulfillment_status || 'Pending'}\nTotal: ${order.total_price} ${order.currency}\nPlaced: ${new Date(order.created_at).toLocaleDateString()}`,
+        message: `📦 **Order #${order.name}**\n\nStatus: ${order.fulfillment_status || 'Pending'}\nTotal: ${order.total_price} ${order.currency}\nPlaced: ${new Date(order.created_at).toLocaleDateString()}`,
         remember: true,
         data: { email, orderId: order.id },
         buttons: [
@@ -304,8 +321,8 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
       if (!productsData?.products || productsData.products.length === 0) {
         return {
-          message: "🛍️ No products available right now.",
-          suggestions: ["Check Back Later"]
+          message: "🛍️ No products available right now. Check back soon!",
+          suggestions: ["Help", "Track Order"]
         };
       }
 
@@ -335,10 +352,14 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
     case 'add_cart': {
       let email = context.email;
+      
       if (!email) {
-        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+/);
+        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
         if (emailMatch) {
           email = emailMatch[0];
+          memory.remember('email', email);
+          await memory.saveToFile();
+          console.log(`📧 Extracted and saved email: ${email}`);
         }
       }
 
@@ -388,6 +409,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
     case 'buy_now': {
       let email = context.email;
+      
       if (!email) {
         return {
           needsInfo: true,
@@ -405,6 +427,7 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
 
     case 'return_order': {
       let email = context.email;
+      
       if (!email) {
         return {
           needsInfo: true,
@@ -420,9 +443,30 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
       };
     }
 
+    case 'general_query':
     default: {
+      const userName = context.userName ? context.userName.split(' ')[0] : null;
+      const greeting = userName 
+        ? `Hi ${userName}! 👋` 
+        : `Hi! 👋`;
+      
+      let message = greeting;
+      
+      // Check if returning user
+      if (context.email || context.previousActions?.length > 0) {
+        message = `${greeting} Welcome back!`;
+      }
+      
+      message += ` How can I help you today?\n\n` +
+        `💬 You can:\n` +
+        `• 🛍️ Browse deals\n` +
+        `• 📦 Track orders\n` +
+        `• 🛒 Add to cart\n` +
+        `• 💳 Buy now\n` +
+        `• 🔄 Return items`;
+      
       return {
-        message: `👋 Hi! How can I help you today?\n\n💬 You can:\n• 🛍️ Browse deals\n• 📦 Track orders\n• 🛒 Add to cart\n• 💳 Buy now\n• 🔄 Return items`,
+        message: message,
         suggestions: ["Browse Deals", "Track Order", "Add to Cart", "Help"]
       };
     }
@@ -737,7 +781,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     console.log(`Business ID: ${businessId}`);
     console.log(`${'='.repeat(60)}\n`);
 
-    // ✅ LOAD BUSINESS DATA - FIXED: Now properly async
+    // ✅ LOAD BUSINESS DATA
     const business = await getBusinessData(businessId);
 
     if (!business) {
@@ -752,58 +796,26 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 
     const { adminToken, shopDomain } = business;
 
-    // ✅ EXTRACT MESSAGE - FIXED: Handle all possible formats
+    // ✅ EXTRACT MESSAGE
     let messageText = null;
     let visitor = {};
-    let operation = "message";
 
     console.log(`\n🔍 Parsing message from SalesIQ...`);
 
     if (req.body?.message?.text) {
       messageText = req.body.message.text;
       visitor = req.body.visitor || {};
-      operation = req.body.operation || "message";
       console.log(`✅ Format 1: Direct message.text found`);
-    }
+    } 
     else if (req.body?.text) {
       messageText = req.body.text;
       visitor = req.body.visitor || {};
       console.log(`✅ Format 2: Root level text found`);
     }
-    else if (req.body?.session?.message) {
-      messageText = req.body.session.message;
-      visitor = req.body.session.visitor || {};
-      console.log(`✅ Format 3: Session message found`);
-    }
-    else if (req.body?.data?.message) {
-      messageText = req.body.data.message;
-      visitor = req.body.data.visitor || {};
-      console.log(`✅ Format 4: Data wrapper found`);
-    }
-    else if (req.body?.payload?.message) {
-      messageText = req.body.payload.message;
-      visitor = req.body.payload.visitor || {};
-      console.log(`✅ Format 5: Payload wrapper found`);
-    }
-    else {
-      for (const [key, value] of Object.entries(req.body)) {
-        if (typeof value === 'string' && value.trim().length > 0) {
-          messageText = value;
-          console.log(`✅ Format 6: Found text in key: ${key}`);
-          break;
-        }
-        if (typeof value === 'object' && value?.text) {
-          messageText = value.text;
-          console.log(`✅ Format 7: Found text in nested object: ${key}`);
-          break;
-        }
-      }
-    }
 
-    // FIXED: Proper validation
     if (!messageText || messageText.trim() === '') {
       console.error(`❌ No message text found`);
-
+      
       return res.json({
         action: "reply",
         replies: [
@@ -815,41 +827,51 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     }
 
     console.log(`📝 Message: "${messageText}"`);
-    console.log(`👤 Visitor: ${JSON.stringify(visitor)}`);
+    console.log(`👤 Visitor:`, visitor);
 
-    const userId = visitor?.email || visitor?.id || visitor?.name || `user_${Date.now()}`;
+    const userId = visitor?.email || visitor?.id || visitor?.name || `visitor_${Date.now()}`;
     console.log(`🆔 User ID: ${userId}`);
 
-    // ✅ GET OR CREATE CONVERSATION MEMORY - FIXED
+    // ✅ GET OR CREATE CONVERSATION MEMORY
     const memoryKey = `${businessId}_${userId}`;
     let memory = userSessions.get(memoryKey);
 
     if (!memory) {
-      // Try loading from persistence
       memory = await ConversationMemory.loadFromFile(businessId, userId);
       userSessions.set(memoryKey, memory);
-      console.log(`✨ Session created/loaded from persistence`);
+      console.log(`✨ Session loaded from persistence`);
     }
 
-    const activeSessions = Array.from(userSessions.keys()).filter(k => k.startsWith(businessId)).length;
-    console.log(`💾 Active sessions for this business: ${activeSessions}`);
+    // 🆕 AUTO-SAVE VISITOR DATA TO MEMORY
+    if (visitor?.email && !memory.context.email) {
+      memory.remember('email', visitor.email);
+      await memory.saveToFile();
+      console.log(`📧 Auto-saved visitor email: ${visitor.email}`);
+    }
 
-    // ✅ DETECT INTENT - FIXED
+    if (visitor?.name && !memory.context.userName) {
+      memory.remember('userName', visitor.name);
+      await memory.saveToFile();
+      console.log(`👤 Auto-saved visitor name: ${visitor.name}`);
+    }
+
+    // ✅ GET CONTEXT FROM MEMORY
+    const context = memory.getContext();
+    
+    console.log(`\n📋 CONTEXT`);
+    console.log(`   Email: ${context.email || 'Not set'}`);
+    console.log(`   Name: ${context.userName || 'Not set'}`);
+    console.log(`   Previous actions: ${context.previousActions?.length || 0}`);
+
+    // ✅ DETECT INTENT
     console.log(`\n🧠 INTENT DETECTION`);
     const { intent, confidence } = await detectIntent(messageText);
     console.log(`   Intent: ${intent}`);
     console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);
 
-    // FIXED: Pass metadata with intent
     memory.addMessage('user', messageText, { intent });
 
-    // ✅ GET CONTEXT FROM MEMORY - FIXED
-    const context = memory.getContext();
-    console.log(`\n📋 CONTEXT`);
-    console.log(`   Email: ${context.email || 'Not set'}`);
-    console.log(`   Previous actions: ${context.previousActions?.length || 0}`);
-
-    // ✅ EXECUTE ACTION - FIXED: All async properly awaited
+    // ✅ EXECUTE ACTION (pass memory too!)
     console.log(`\n⚙️ EXECUTING ACTION`);
     console.log(`   Shop: ${shopDomain}`);
     console.log(`   Intent: ${intent}`);
@@ -859,7 +881,8 @@ app.post("/api/zobot/:businessId", async (req, res) => {
       messageText,
       context,
       shopDomain,
-      adminToken
+      adminToken,
+      memory  // 🆕 Pass memory object
     );
 
     if (!actionResult) {
@@ -868,21 +891,25 @@ app.post("/api/zobot/:businessId", async (req, res) => {
 
     console.log(`   ✅ Action completed`);
 
-    // ✅ BUILD SALESIQ RESPONSE - FIXED
+    // ✅ BUILD SALESIQ RESPONSE
     const response = buildSalesIQResponse(actionResult);
     console.log(`\n📤 RESPONSE`);
     console.log(`   Action: ${response.action}`);
     console.log(`   Replies: ${response.replies?.length || 0}`);
 
-    // ✅ REMEMBER FOR NEXT INTERACTION - FIXED
+    // ✅ SAVE EVERYTHING TO MEMORY
     memory.addMessage('bot', actionResult.message);
 
     if (actionResult.remember && actionResult.data) {
-      memory.remember(intent, actionResult.data);
-      // FIXED: Save memory after interaction
-      await memory.saveToFile();
-      console.log(`   💾 Data saved to persistence`);
+      // Save each field from data to context
+      for (const [key, val] of Object.entries(actionResult.data)) {
+        memory.remember(key, val);
+      }
+      console.log(`   💾 Saved to memory: ${Object.keys(actionResult.data).join(', ')}`);
     }
+
+    // 🆕 ALWAYS SAVE MEMORY AFTER EACH INTERACTION
+    await memory.saveToFile();
 
     console.log(`\n✅ Response sent successfully`);
     console.log(`${'='.repeat(60)}\n`);
@@ -906,6 +933,7 @@ app.post("/api/zobot/:businessId", async (req, res) => {
     });
   }
 });
+
 
 // =====================================================
 // GET BUSINESS DATA ENDPOINT - FIXED

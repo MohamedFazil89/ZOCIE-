@@ -500,7 +500,8 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
 
 app.post("/salesiq-deals", async (req, res) => {
   try {
-    const shop = req.body.shop || activeStore;
+    // const shop = req.body.shop || activeStore;
+    const shop = 'fractix.myshopify.com.';
     const data = await shopifyOAuthRequest(shop, "/products.json?limit=10&sort=created_at:desc");
     const products = data.products || [];
 

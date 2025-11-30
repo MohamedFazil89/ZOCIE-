@@ -501,10 +501,10 @@ app.get("/api/shopify/auth/start", (req, res) => {
 
   const redirectUri = `${BASE_URL}/api/shopify/auth/callback`;
   const authUrl = `https://${shop}/admin/oauth/authorize?` +
-  `client_id=${SHOPIFY_API_KEY}&` +
-  `scope=read_products,write_products,read_orders,write_orders,read_draft_orders,write_draft_orders,read_customers,write_customers&` +
-  `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-  `state=${state}`;
+    `client_id=${SHOPIFY_API_KEY}&` +
+    `scope=read_products,write_products,read_orders,write_orders,read_draft_orders,write_draft_orders,read_customers,write_customers&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `state=${state}`;
 
 
   console.log('🔗 OAuth URL generated for shop:', shop);
@@ -558,7 +558,9 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
     }
 
     const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token;
+    // const accessToken = tokenData.access_token;
+    const accessToken = process.env.ADMIN_TOKEN_KEY;
+
 
     if (!accessToken) {
       throw new Error("Failed to get access token");

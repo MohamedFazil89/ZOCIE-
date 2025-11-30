@@ -54,77 +54,77 @@ const userSessions = new Map(); // "businessId_userId" → conversation memory
 // =====================================================
 
 class ConversationMemory {
-  constructor(businessId, userId) {
-    this.businessId = businessId;
-    this.userId = userId;
-    this.messages = [];
-    this.context = {
-      email: null,
-      orderId: null,
-      previousActions: []
-    };
-  }
-
-  addMessage(role, content, metadata = {}) {
-    this.messages.push({
-      role,
-      content,
-      metadata,
-      timestamp: new Date().toISOString()
-    });
-    
-    // Keep only last 50 messages
-    if (this.messages.length > 50) {
-      this.messages = this.messages.slice(-50);
+    constructor(businessId, userId) {
+        this.businessId = businessId;
+        this.userId = userId;
+        this.messages = [];
+        this.context = {
+            email: null,
+            orderId: null,
+            previousActions: []
+        };
     }
-  }
 
-  remember(key, value) {
-    if (typeof value === 'object' && value !== null) {
-      this.context = { ...this.context, ...value };
-    } else {
-      this.context[key] = value;
+    addMessage(role, content, metadata = {}) {
+        this.messages.push({
+            role,
+            content,
+            metadata,
+            timestamp: new Date().toISOString()
+        });
+
+        // Keep only last 50 messages
+        if (this.messages.length > 50) {
+            this.messages = this.messages.slice(-50);
+        }
     }
-  }
 
-  recall(key) {
-    return this.context[key];
-  }
-
-  getContext() {
-    return this.context;
-  }
-
-  async saveToFile() {
-    try {
-      await persistence.saveConversationMemory(this.businessId, this.userId, {
-        messages: this.messages,
-        context: this.context
-      });
-    } catch (error) {
-      console.error(`Error saving conversation to file:`, error);
+    remember(key, value) {
+        if (typeof value === 'object' && value !== null) {
+            this.context = { ...this.context, ...value };
+        } else {
+            this.context[key] = value;
+        }
     }
-  }
 
-  static async loadFromFile(businessId, userId) {
-    try {
-      const data = await persistence.loadConversationMemory(businessId, userId);
-      if (!data) {
-        return new ConversationMemory(businessId, userId);
-      }
-      const memory = new ConversationMemory(businessId, userId);
-      memory.messages = data.messages || [];
-      memory.context = data.context || {
-        email: null,
-        orderId: null,
-        previousActions: []
-      };
-      return memory;
-    } catch (error) {
-      console.error(`Error loading conversation from file:`, error);
-      return new ConversationMemory(businessId, userId);
+    recall(key) {
+        return this.context[key];
     }
-  }
+
+    getContext() {
+        return this.context;
+    }
+
+    async saveToFile() {
+        try {
+            await persistence.saveConversationMemory(this.businessId, this.userId, {
+                messages: this.messages,
+                context: this.context
+            });
+        } catch (error) {
+            console.error(`Error saving conversation to file:`, error);
+        }
+    }
+
+    static async loadFromFile(businessId, userId) {
+        try {
+            const data = await persistence.loadConversationMemory(businessId, userId);
+            if (!data) {
+                return new ConversationMemory(businessId, userId);
+            }
+            const memory = new ConversationMemory(businessId, userId);
+            memory.messages = data.messages || [];
+            memory.context = data.context || {
+                email: null,
+                orderId: null,
+                previousActions: []
+            };
+            return memory;
+        } catch (error) {
+            console.error(`Error loading conversation from file:`, error);
+            return new ConversationMemory(businessId, userId);
+        }
+    }
 }
 
 // =====================================================
@@ -132,7 +132,7 @@ class ConversationMemory {
 // =====================================================
 
 function generateBusinessId() {
-    return 'biz_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    return 'biz_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
 }
 
 async function saveBusinessData(businessId, businessData) {
@@ -153,7 +153,7 @@ async function getBusinessData(businessId) {
     if (businessDatabase.has(businessId)) {
         return businessDatabase.get(businessId);
     }
-    
+
     // Try loading from file
     try {
         const data = await persistence.loadBusinessData(businessId);
@@ -167,7 +167,7 @@ async function getBusinessData(businessId) {
     } catch (error) {
         console.error(`Error loading business data:`, error);
     }
-    
+
     return null;
 }
 
@@ -211,35 +211,22 @@ async function shopifyApiCall(shopDomain, adminToken, endpoint, method = "GET", 
 // =====================================================
 // INTENT DETECTION (NLP)
 // =====================================================
-
 async function detectIntent(userMessage) {
     const msg = userMessage.toLowerCase();
 
     const intents = {
-        track_order: {
-            patterns: /track|status|where|delivery|order|shipping/,
+        // 🆕 ADD THIS - Greeting detection
+        greeting: {
+            patterns: /^(hi|hey|hello|yo|sup|hola|greetings|good\s+(morning|afternoon|evening)|remember\s+me|its\s+me|im\s+back)/i,
             confidence: 0.95
         },
-        browse_deals: {
-            patterns: /deal|product|browse|show|what.*sell|what.*have|catalog|collection/,
-            confidence: 0.9
-        },
-        add_cart: {
-            patterns: /add.*cart|add to cart|add this|want to buy|interested|interested in/,
-            confidence: 0.9
-        },
-        buy_now: {
-            patterns: /buy now|checkout|payment|purchase|price|cost|how much/,
-            confidence: 0.85
-        },
-        return_order: {
-            patterns: /return|refund|money back|cancel|issue|wrong|damaged|not good/,
-            confidence: 0.9
-        },
-        product_info: {
-            patterns: /tell|about|info|details|describe|specifications|spec/,
-            confidence: 0.8
-        }
+
+        trackorder: { patterns: /track|status|where|delivery|order|shipping/, confidence: 0.95 },
+        browsedeals: { patterns: /deal|product|browse|show|what.*sell|what.*have|catalog|collection/, confidence: 0.9 },
+        addcart: { patterns: /add.*cart|add to cart|add this|want to buy|interested|interested in/, confidence: 0.9 },
+        buynow: { patterns: /buy now|checkout|payment|purchase|price|cost|how much/, confidence: 0.85 },
+        returnorder: { patterns: /return|refund|money back|cancel|issue|wrong|damaged|not good/, confidence: 0.9 },
+        productinfo: { patterns: /tell|about|info|details|describe|specifications|spec/, confidence: 0.8 }
     };
 
     for (const [intent, { patterns, confidence }] of Object.entries(intents)) {
@@ -248,7 +235,7 @@ async function detectIntent(userMessage) {
         }
     }
 
-    return { intent: "general_query", confidence: 0.5 };
+    return { intent: 'generalquery', confidence: 0.5 };
 }
 
 // =====================================================
@@ -261,56 +248,209 @@ async function executeAction(intent, userMessage, context, shopDomain, adminToke
         shopifyApiCall(shopDomain, adminToken, endpoint, method, body);
 
     switch (intent) {
-        case 'track_order': {
-            let email = context.email;
+        // 🆕 ADD THIS CASE
+        case 'greeting':
+            // Check if user has context (returning user)
+            if (context.email || context.orderId || context.previousActions?.length > 0) {
+                const greeting = `Welcome back${context.email ? `, ${context.email.split('@')[0]}` : ''}! 👋`;
+                const lastAction = context.previousActions?.[context.previousActions.length - 1];
 
-            // Extract email from message if not in context
-            if (!email) {
-                const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
-                if (emailMatch) {
-                    email = emailMatch[0];
+                let followUp = "\n\nHow can I help you today?";
+                if (lastAction === 'trackorder') {
+                    followUp = "\n\nWould you like to check your order status again?";
+                } else if (lastAction === 'browsedeals') {
+                    followUp = "\n\nWant to see more deals?";
                 }
-            }
 
-            if (!email) {
                 return {
-                    needsInfo: true,
-                    fieldNeeded: "email",
-                    question: "📧 What's your email to find your order?",
-                    inputType: "email",
-                    message: "Email required"
+                    message: greeting + followUp,
+                    suggestions: ['Track Order', 'Browse Deals', 'Add to Cart', 'Help'],
+                    remember: false // Don't overwrite existing context
+                };
+            } else {
+                // New user
+                return {
+                    message: "👋 Hi! Welcome to our store!\n\nHow can I help you today? You can:\n• 🛍️ Browse deals\n• 📦 Track orders\n• 🛒 Add to cart\n• 💳 Buy now\n• 🔄 Return items",
+                    suggestions: ['Browse Deals', 'Track Order', 'Add to Cart', 'Help']
                 };
             }
-
-            const ordersData = await shopifyCall(
-                `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=1`
-            );
-
-            if (!ordersData?.orders || ordersData.orders.length === 0) {
-                return {
-                    message: `No orders found for ${email}. Please check your email address.`,
-                    suggestions: ["Browse Products", "Help"]
-                };
-            }
-
-            const order = ordersData.orders[0];
-            return {
-                message: `📦 **Order #${order.name}**\n` +
-                    `Status: ${order.fulfillment_status || 'Pending'}\n` +
-                    `Total: ${order.total_price} ${order.currency}\n` +
-                    `Placed: ${new Date(order.created_at).toLocaleDateString()}`,
-                remember: true,
-                data: { email, orderId: order.id },
-                buttons: [
-                    {
-                        label: "Track Shipment",
-                        type: "url",
-                        value: order.order_status_url
-                    }
-                ],
-                suggestions: ["View Details", "Return Order", "Browse Products"]
-            };
+        case 'track_order': {
+    // 🔍 Step 1: Try to get email from context first
+    let email = context.email;
+    
+    console.log('🔎 Checking for email...');
+    console.log('  📋 Context email:', email || 'Not found');
+    
+    // 🔍 Step 2: If no email in context, try to extract from current message
+    if (!email) {
+        const emailMatch = userMessage.match(/[\w\.-]+@[\w\.-]+\.\w+/);
+        if (emailMatch) {
+            email = emailMatch[0];
+            console.log('  ✉️ Extracted from message:', email);
+            
+            // 🆕 IMPORTANT: Save extracted email to context for future use
+            context.email = email;
         }
+    }
+    
+    // 🔍 Step 3: Only ask for email if still not found after all checks
+    if (!email) {
+        console.log('  ❌ No email found - asking user');
+        return {
+            needsInfo: true,
+            fieldNeeded: "email",
+            question: "📧 What's your email address? I'll use it to find your order.",
+            inputType: "email",
+            message: "Email required to track your order",
+            suggestions: ["Help", "Browse Products"]
+        };
+    }
+    
+    console.log('  ✅ Using email:', email);
+    console.log('🛍️ Fetching orders from Shopify...');
+    
+    // 🔍 Step 4: Fetch orders from Shopify
+    const ordersData = await shopifyCall(
+        `/orders.json?status=any&email=${encodeURIComponent(email)}&limit=5`
+    );
+    
+    // 🔍 Step 5: Handle no orders found
+    if (!ordersData?.orders || ordersData.orders.length === 0) {
+        console.log('  ❌ No orders found for:', email);
+        return {
+            message: `📭 **No Orders Found**\n\n` +
+                `I couldn't find any orders for **${email}**.\n\n` +
+                `Please check:\n` +
+                `• Email spelling is correct\n` +
+                `• You've placed an order before\n` +
+                `• Order was placed on this store`,
+            remember: true,
+            data: { email }, // Remember email even if no orders
+            suggestions: ["Browse Products", "Try Another Email", "Help"]
+        };
+    }
+    
+    console.log(`  ✅ Found ${ordersData.orders.length} order(s)`);
+    
+    // 🔍 Step 6: Process the most recent order
+    const order = ordersData.orders[0];
+    
+    // Format fulfillment status with emoji
+    let statusEmoji = '📦';
+    let statusText = order.fulfillment_status || 'Unfulfilled';
+    
+    if (statusText === 'fulfilled') {
+        statusEmoji = '✅';
+        statusText = 'Delivered';
+    } else if (statusText === 'partial') {
+        statusEmoji = '📮';
+        statusText = 'Partially Shipped';
+    } else if (statusText === null || statusText === 'Unfulfilled') {
+        statusEmoji = '⏳';
+        statusText = 'Processing';
+    }
+    
+    // Format financial status
+    let paymentEmoji = '💳';
+    let paymentStatus = order.financial_status || 'pending';
+    
+    if (paymentStatus === 'paid') {
+        paymentEmoji = '✅';
+        paymentStatus = 'Paid';
+    } else if (paymentStatus === 'pending') {
+        paymentEmoji = '⏳';
+        paymentStatus = 'Payment Pending';
+    } else if (paymentStatus === 'refunded') {
+        paymentEmoji = '🔄';
+        paymentStatus = 'Refunded';
+    }
+    
+    // Build item list
+    const itemsList = order.line_items
+        ?.slice(0, 3) // Show max 3 items
+        .map(item => `  • ${item.quantity}x ${item.name}`)
+        .join('\n') || '  • Items unavailable';
+    
+    const moreItems = order.line_items?.length > 3 
+        ? `\n  • ...and ${order.line_items.length - 3} more item(s)` 
+        : '';
+    
+    // Calculate days since order
+    const orderDate = new Date(order.created_at);
+    const daysSince = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
+    const daysText = daysSince === 0 ? 'Today' : 
+                     daysSince === 1 ? 'Yesterday' : 
+                     `${daysSince} days ago`;
+    
+    // Build response message
+    let message = `${statusEmoji} **Order #${order.name}**\n\n` +
+        `**Status:** ${statusText}\n` +
+        `**Payment:** ${paymentEmoji} ${paymentStatus}\n` +
+        `**Total:** ${order.total_price} ${order.currency}\n` +
+        `**Placed:** ${orderDate.toLocaleDateString()} (${daysText})\n\n` +
+        `**Items:**\n${itemsList}${moreItems}`;
+    
+    // Add tracking info if available
+    if (order.fulfillments && order.fulfillments.length > 0) {
+        const tracking = order.fulfillments[0];
+        if (tracking.tracking_number) {
+            message += `\n\n📍 **Tracking:** ${tracking.tracking_number}`;
+            if (tracking.tracking_company) {
+                message += ` (${tracking.tracking_company})`;
+            }
+        }
+    }
+    
+    // Build buttons array
+    const buttons = [];
+    
+    // Add tracking button if order status URL exists
+    if (order.order_status_url) {
+        buttons.push({
+            label: "🔍 Track Shipment",
+            type: "url",
+            value: order.order_status_url
+        });
+    }
+    
+    // Add view details button (if you have order details page)
+    if (order.id) {
+        buttons.push({
+            label: "📄 View Full Details",
+            type: "url",
+            value: order.order_status_url || `https://${shopDomain}/account/orders/${order.token || order.id}`
+        });
+    }
+    
+    // Build suggestions based on order status
+    let suggestions = ["Browse Products", "Help"];
+    
+    if (ordersData.orders.length > 1) {
+        suggestions.unshift("View Other Orders");
+    }
+    
+    // Only show "Return Order" if delivered and within return window (e.g., 30 days)
+    if (statusText === 'Delivered' && daysSince <= 30) {
+        suggestions.unshift("Return Order");
+    }
+    
+    console.log('  ✅ Order details sent successfully');
+    
+    return {
+        message: message,
+        remember: true,
+        data: { 
+            email, 
+            orderId: order.id,
+            orderName: order.name,
+            orderStatus: order.fulfillment_status,
+            lastOrderDate: order.created_at
+        },
+        buttons: buttons.length > 0 ? buttons : undefined,
+        suggestions: suggestions
+    };
+}
+
 
         case 'browse_deals': {
             const productsData = await shopifyCall(
@@ -814,213 +954,217 @@ app.get("/api/shopify/auth/callback", async (req, res) => {
 // =====================================================
 
 app.post("/api/zobot/:businessId", async (req, res) => {
-  try {
-    const { businessId } = req.params;
-    
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`📨 WEBHOOK REQUEST RECEIVED`);
-    console.log(`Business ID: ${businessId}`);
-    console.log(`Timestamp: ${new Date().toISOString()}`);
-    console.log(`Full Request Body:`, JSON.stringify(req.body, null, 2));
-    console.log(`${'='.repeat(60)}\n`);
+    try {
+        const { businessId } = req.params;
 
-    // ✅ LOAD BUSINESS DATA (from memory or file)
-    let business = await getBusinessData(businessId);
-    
-    if (!business) {
-      console.error(`❌ Business not found: ${businessId}`);
-      return res.json({
-        action: "reply",
-        replies: ["Sorry, bot configuration not found. Please reconnect your store."],
-        suggestions: ["Help", "Contact Support"]
-      });
-    }
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`📨 WEBHOOK REQUEST RECEIVED`);
+        console.log(`Business ID: ${businessId}`);
+        console.log(`Timestamp: ${new Date().toISOString()}`);
+        console.log(`Full Request Body:`, JSON.stringify(req.body, null, 2));
+        console.log(`${'='.repeat(60)}\n`);
 
-    console.log(`✅ Business found: ${business.shopName} (${business.shopDomain})`);
-    console.log(`   Status: ${business.status}`);
-    console.log(`   Connected: ${business.connectedAt}`);
+        // ✅ LOAD BUSINESS DATA (from memory or file)
+        let business = await getBusinessData(businessId);
 
-    const { adminToken, shopDomain } = business;
-    
-    // ✅ EXTRACT MESSAGE - HANDLE ALL POSSIBLE FORMATS
-    let messageText = null;
-    let visitor = {};
-    let operation = "message";
-
-    console.log(`\n🔍 Parsing message from SalesIQ...`);
-
-    // Try multiple ways to get the message (SalesIQ sends in different formats)
-    if (req.body?.message?.text) {
-      messageText = req.body.message.text;
-      visitor = req.body.visitor || {};
-      operation = req.body.operation || "message";
-      console.log(`✅ Format 1: Direct message.text found`);
-    } 
-    else if (req.body?.text) {
-      messageText = req.body.text;
-      visitor = req.body.visitor || {};
-      console.log(`✅ Format 2: Root level text found`);
-    } 
-    else if (req.body?.session?.message) {
-      messageText = req.body.session.message;
-      visitor = req.body.session.visitor || {};
-      console.log(`✅ Format 3: Session message found`);
-    }
-    else if (req.body?.data?.message) {
-      messageText = req.body.data.message;
-      visitor = req.body.data.visitor || {};
-      console.log(`✅ Format 4: Data wrapper found`);
-    }
-    else if (req.body?.payload?.message) {
-      messageText = req.body.payload.message;
-      visitor = req.body.payload.visitor || {};
-      console.log(`✅ Format 5: Payload wrapper found`);
-    }
-    // Last resort - check if there's ANY text property
-    else {
-      for (const [key, value] of Object.entries(req.body)) {
-        if (typeof value === 'string' && value.trim().length > 0) {
-          messageText = value;
-          console.log(`✅ Format 6: Found text in key: ${key}`);
-          break;
+        if (!business) {
+            console.error(`❌ Business not found: ${businessId}`);
+            return res.json({
+                action: "reply",
+                replies: ["Sorry, bot configuration not found. Please reconnect your store."],
+                suggestions: ["Help", "Contact Support"]
+            });
         }
-        if (typeof value === 'object' && value?.text) {
-          messageText = value.text;
-          console.log(`✅ Format 7: Found text in nested object: ${key}`);
-          break;
+
+        console.log(`✅ Business found: ${business.shopName} (${business.shopDomain})`);
+        console.log(`   Status: ${business.status}`);
+        console.log(`   Connected: ${business.connectedAt}`);
+
+        const { adminToken, shopDomain } = business;
+
+        // ✅ EXTRACT MESSAGE - HANDLE ALL POSSIBLE FORMATS
+        let messageText = null;
+        let visitor = {};
+        let operation = "message";
+
+        console.log(`\n🔍 Parsing message from SalesIQ...`);
+
+        // Try multiple ways to get the message (SalesIQ sends in different formats)
+        if (req.body?.message?.text) {
+            messageText = req.body.message.text;
+            visitor = req.body.visitor || {};
+            operation = req.body.operation || "message";
+            console.log(`✅ Format 1: Direct message.text found`);
         }
-      }
+        else if (req.body?.text) {
+            messageText = req.body.text;
+            visitor = req.body.visitor || {};
+            console.log(`✅ Format 2: Root level text found`);
+        }
+        else if (req.body?.session?.message) {
+            messageText = req.body.session.message;
+            visitor = req.body.session.visitor || {};
+            console.log(`✅ Format 3: Session message found`);
+        }
+        else if (req.body?.data?.message) {
+            messageText = req.body.data.message;
+            visitor = req.body.data.visitor || {};
+            console.log(`✅ Format 4: Data wrapper found`);
+        }
+        else if (req.body?.payload?.message) {
+            messageText = req.body.payload.message;
+            visitor = req.body.payload.visitor || {};
+            console.log(`✅ Format 5: Payload wrapper found`);
+        }
+        // Last resort - check if there's ANY text property
+        else {
+            for (const [key, value] of Object.entries(req.body)) {
+                if (typeof value === 'string' && value.trim().length > 0) {
+                    messageText = value;
+                    console.log(`✅ Format 6: Found text in key: ${key}`);
+                    break;
+                }
+                if (typeof value === 'object' && value?.text) {
+                    messageText = value.text;
+                    console.log(`✅ Format 7: Found text in nested object: ${key}`);
+                    break;
+                }
+            }
+        }
+
+        // If still no message, return helpful error
+        if (!messageText || messageText.trim() === '') {
+            console.error(`❌ No message text found in any format`);
+            console.error(`Request keys:`, Object.keys(req.body));
+
+            return res.json({
+                action: "reply",
+                replies: [
+                    "👋 I couldn't understand your message. Please try again!",
+                    "Try saying: 'show me deals', 'track order', 'add to cart', or 'help'"
+                ],
+                suggestions: ["Browse Deals", "Track Order", "Help"]
+            });
+        }
+
+        console.log(`📝 Message extracted: "${messageText}"`);
+        console.log(`👤 Visitor data:`, JSON.stringify(visitor, null, 2));
+
+        const userId = visitor?.email || visitor?.id || visitor?.name || `visitor_${Date.now()}`;
+        console.log('User ID:', userId);
+
+        // GET OR CREATE CONVERSATION MEMORY
+        const memoryKey = `${businessId}:${userId}`;
+        let memory;
+        if (!userSessions.has(memoryKey)) {
+            console.log('Loading conversation memory from file...');
+            memory = await ConversationMemory.loadFromFile(businessId, userId);
+            userSessions.set(memoryKey, memory);
+            console.log('Conversation session created/loaded');
+        } else {
+            memory = userSessions.get(memoryKey);
+            console.log('Reusing existing session');
+        }
+
+        // 🆕 ADD THIS - Auto-save visitor email if available
+        if (visitor?.email && !memory.context.email) {
+            memory.remember({ email: visitor.email });
+            console.log('📧 Auto-saved visitor email to context:', visitor.email);
+            await memory.saveToFile(); // Persist immediately
+        }
+
+        const activeSessions = Array.from(userSessions.keys())
+            .filter(k => k.startsWith(businessId)).length;
+        console.log(`💾 Active sessions for this business: ${activeSessions}`);
+
+        // ✅ DETECT INTENT
+        console.log(`\n🧠 INTENT DETECTION`);
+        const { intent, confidence } = await detectIntent(messageText);
+        console.log(`   Intent: ${intent}`);
+        console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);
+
+        // Add message to memory with metadata
+        memory.addMessage('user', messageText, { intent, confidence });
+
+        // ✅ GET CONTEXT FROM MEMORY
+        const context = memory.getContext();
+        console.log(`\n📋 CONTEXT FROM MEMORY`);
+        console.log(`   Email: ${context.email || 'Not set'}`);
+        console.log(`   Order ID: ${context.orderId || 'None'}`);
+        console.log(`   Previous actions:`, context.previousActions || []);
+
+        // ✅ EXECUTE ACTION
+        console.log(`\n⚙️ EXECUTING ACTION`);
+        console.log(`   Shop: ${shopDomain}`);
+        console.log(`   Intent: ${intent}`);
+
+        const actionResult = await executeAction(
+            intent,
+            messageText,
+            context,
+            shopDomain,
+            adminToken
+        );
+
+        console.log(`   ✅ Action completed successfully`);
+        if (actionResult.needsInfo) {
+            console.log(`   ⚠️ Additional info needed: ${actionResult.fieldNeeded}`);
+        }
+
+        // ✅ BUILD SALESIQ RESPONSE
+        const response = buildSalesIQResponse(actionResult);
+        console.log(`\n📤 BUILDING RESPONSE`);
+        console.log(`   Action type: ${response.action}`);
+        console.log(`   Has suggestions: ${!!response.suggestions}`);
+        console.log(`   Has buttons: ${!!response.buttons}`);
+
+        // ✅ UPDATE MEMORY AND PERSIST
+        memory.addMessage('bot', actionResult.message, {
+            intent,
+            actionType: response.action
+        });
+
+        if (actionResult.remember && actionResult.data) {
+            memory.remember(actionResult.data);
+
+            // Track action in context
+            if (!context.previousActions) {
+                context.previousActions = [];
+            }
+            context.previousActions.push({
+                intent,
+                timestamp: new Date().toISOString()
+            });
+
+            console.log(`   💾 Data saved to memory`);
+        }
+
+        // Save memory to file (async, don't wait)
+        memory.saveToFile().catch(err => {
+            console.error(`⚠️ Failed to save conversation to file:`, err);
+        });
+
+        console.log(`\n✅ Response sent successfully`);
+        console.log(`${'='.repeat(60)}\n`);
+
+        res.json(response);
+
+    } catch (error) {
+        console.error(`\n${'='.repeat(60)}`);
+        console.error(`❌ ZOBOT WEBHOOK ERROR`);
+        console.error(`Error: ${error.message}`);
+        console.error(`Stack trace:`, error.stack);
+        console.error(`${'='.repeat(60)}\n`);
+
+        res.json({
+            action: "reply",
+            replies: [
+                `⚠️ An error occurred: ${error.message}`,
+                "Please try again or contact support if the issue persists."
+            ],
+            suggestions: ["Try Again", "Browse Deals", "Help"]
+        });
     }
-
-    // If still no message, return helpful error
-    if (!messageText || messageText.trim() === '') {
-      console.error(`❌ No message text found in any format`);
-      console.error(`Request keys:`, Object.keys(req.body));
-      
-      return res.json({
-        action: "reply",
-        replies: [
-          "👋 I couldn't understand your message. Please try again!",
-          "Try saying: 'show me deals', 'track order', 'add to cart', or 'help'"
-        ],
-        suggestions: ["Browse Deals", "Track Order", "Help"]
-      });
-    }
-
-    console.log(`📝 Message extracted: "${messageText}"`);
-    console.log(`👤 Visitor data:`, JSON.stringify(visitor, null, 2));
-
-    // Generate userId from visitor info
-    const userId = visitor?.email || visitor?.id || visitor?.name || `visitor_${Date.now()}`;
-    console.log(`🆔 User ID: ${userId}`);
-
-    // ✅ GET OR CREATE CONVERSATION MEMORY
-    const memoryKey = `${businessId}_${userId}`;
-    let memory;
-
-    if (!userSessions.has(memoryKey)) {
-      // Try to load from file first
-      console.log(`💾 Loading conversation memory from file...`);
-      memory = await ConversationMemory.loadFromFile(businessId, userId);
-      userSessions.set(memoryKey, memory);
-      console.log(`✨ Conversation session created/loaded`);
-    } else {
-      memory = userSessions.get(memoryKey);
-      console.log(`♻️ Reusing existing session`);
-    }
-
-    const activeSessions = Array.from(userSessions.keys())
-      .filter(k => k.startsWith(businessId)).length;
-    console.log(`💾 Active sessions for this business: ${activeSessions}`);
-
-    // ✅ DETECT INTENT
-    console.log(`\n🧠 INTENT DETECTION`);
-    const { intent, confidence } = await detectIntent(messageText);
-    console.log(`   Intent: ${intent}`);
-    console.log(`   Confidence: ${(confidence * 100).toFixed(1)}%`);
-    
-    // Add message to memory with metadata
-    memory.addMessage('user', messageText, { intent, confidence });
-
-    // ✅ GET CONTEXT FROM MEMORY
-    const context = memory.getContext();
-    console.log(`\n📋 CONTEXT FROM MEMORY`);
-    console.log(`   Email: ${context.email || 'Not set'}`);
-    console.log(`   Order ID: ${context.orderId || 'None'}`);
-    console.log(`   Previous actions:`, context.previousActions || []);
-
-    // ✅ EXECUTE ACTION
-    console.log(`\n⚙️ EXECUTING ACTION`);
-    console.log(`   Shop: ${shopDomain}`);
-    console.log(`   Intent: ${intent}`);
-    
-    const actionResult = await executeAction(
-      intent,
-      messageText,
-      context,
-      shopDomain,
-      adminToken
-    );
-
-    console.log(`   ✅ Action completed successfully`);
-    if (actionResult.needsInfo) {
-      console.log(`   ⚠️ Additional info needed: ${actionResult.fieldNeeded}`);
-    }
-
-    // ✅ BUILD SALESIQ RESPONSE
-    const response = buildSalesIQResponse(actionResult);
-    console.log(`\n📤 BUILDING RESPONSE`);
-    console.log(`   Action type: ${response.action}`);
-    console.log(`   Has suggestions: ${!!response.suggestions}`);
-    console.log(`   Has buttons: ${!!response.buttons}`);
-    
-    // ✅ UPDATE MEMORY AND PERSIST
-    memory.addMessage('bot', actionResult.message, { 
-      intent, 
-      actionType: response.action 
-    });
-    
-    if (actionResult.remember && actionResult.data) {
-      memory.remember(actionResult.data);
-      
-      // Track action in context
-      if (!context.previousActions) {
-        context.previousActions = [];
-      }
-      context.previousActions.push({
-        intent,
-        timestamp: new Date().toISOString()
-      });
-      
-      console.log(`   💾 Data saved to memory`);
-    }
-
-    // Save memory to file (async, don't wait)
-    memory.saveToFile().catch(err => {
-      console.error(`⚠️ Failed to save conversation to file:`, err);
-    });
-
-    console.log(`\n✅ Response sent successfully`);
-    console.log(`${'='.repeat(60)}\n`);
-    
-    res.json(response);
-
-  } catch (error) {
-    console.error(`\n${'='.repeat(60)}`);
-    console.error(`❌ ZOBOT WEBHOOK ERROR`);
-    console.error(`Error: ${error.message}`);
-    console.error(`Stack trace:`, error.stack);
-    console.error(`${'='.repeat(60)}\n`);
-    
-    res.json({
-      action: "reply",
-      replies: [
-        `⚠️ An error occurred: ${error.message}`,
-        "Please try again or contact support if the issue persists."
-      ],
-      suggestions: ["Try Again", "Browse Deals", "Help"]
-    });
-  }
 });
 
 // =====================================================
@@ -1034,10 +1178,10 @@ app.get("/api/business/:businessId", async (req, res) => {
         const business = await getBusinessData(businessId);
 
         if (!business) {
-            return res.status(404).json({ 
-              error: "Business not found",
-              businessId: businessId,
-              message: "This business configuration does not exist. Please reconnect your store."
+            return res.status(404).json({
+                error: "Business not found",
+                businessId: businessId,
+                message: "This business configuration does not exist. Please reconnect your store."
             });
         }
 
@@ -1064,9 +1208,9 @@ app.get("/api/business/:businessId", async (req, res) => {
 
     } catch (error) {
         console.error('❌ Error fetching business data:', error);
-        res.status(500).json({ 
-          error: "Internal server error",
-          message: error.message 
+        res.status(500).json({
+            error: "Internal server error",
+            message: error.message
         });
     }
 });
@@ -1078,9 +1222,9 @@ app.get("/api/business/:businessId", async (req, res) => {
 app.get("/api/shopify/status/:shopDomain", async (req, res) => {
     try {
         const { shopDomain } = req.params;
-        
+
         const businessId = shopToBusinessMap.get(shopDomain);
-        
+
         if (!businessId) {
             return res.json({
                 connected: false,
@@ -1088,9 +1232,9 @@ app.get("/api/shopify/status/:shopDomain", async (req, res) => {
                 message: "Shop not connected"
             });
         }
-        
+
         const business = await getBusinessData(businessId);
-        
+
         if (!business) {
             return res.json({
                 connected: false,
@@ -1098,7 +1242,7 @@ app.get("/api/shopify/status/:shopDomain", async (req, res) => {
                 message: "Business data not found"
             });
         }
-        
+
         res.json({
             connected: true,
             shopDomain: shopDomain,
@@ -1108,12 +1252,12 @@ app.get("/api/shopify/status/:shopDomain", async (req, res) => {
             connectedAt: business.connectedAt,
             webhookUrl: business.webhookUrl
         });
-        
+
     } catch (error) {
         console.error('❌ Error checking shop status:', error);
-        res.status(500).json({ 
-          error: "Internal server error",
-          message: error.message 
+        res.status(500).json({
+            error: "Internal server error",
+            message: error.message
         });
     }
 });
@@ -1125,33 +1269,33 @@ app.get("/api/shopify/status/:shopDomain", async (req, res) => {
 app.post("/api/shopify/reconnect", async (req, res) => {
     try {
         const { businessId, shopDomain, adminToken } = req.body;
-        
+
         if (!businessId || !shopDomain || !adminToken) {
             return res.status(400).json({
                 error: "Missing required fields: businessId, shopDomain, adminToken"
             });
         }
-        
+
         // Load existing business
         let business = await getBusinessData(businessId);
-        
+
         if (!business) {
             return res.status(404).json({
                 error: "Business not found",
                 businessId: businessId
             });
         }
-        
+
         // Update token and timestamp
         business.adminToken = adminToken;
         business.lastReconnected = new Date().toISOString();
         business.status = "active";
-        
+
         // Save updated business
         await saveBusinessData(businessId, business);
-        
+
         console.log(`✅ Business reconnected: ${businessId}`);
-        
+
         res.json({
             success: true,
             businessId: businessId,
@@ -1159,12 +1303,12 @@ app.post("/api/shopify/reconnect", async (req, res) => {
             webhookUrl: business.webhookUrl,
             message: "Business reconnected successfully"
         });
-        
+
     } catch (error) {
         console.error('❌ Error reconnecting business:', error);
-        res.status(500).json({ 
-          error: "Internal server error",
-          message: error.message 
+        res.status(500).json({
+            error: "Internal server error",
+            message: error.message
         });
     }
 });
@@ -1701,51 +1845,51 @@ let server = null;
 const PORT = process.env.PORT || 3000;
 
 async function startServer() {
-  try {
-    console.log('\n🚀 Starting server...\n');
-    
-    // ✅ 1. Initialize persistence directories
-    console.log('📁 Initializing persistence...');
-    await persistence.initializePersistence();
-    
-    // ✅ 2. Load all businesses from files
-    console.log('💼 Loading businesses from storage...');
-    businessDatabase = await persistence.loadAllBusinesses();
-    
-    // ✅ 3. Rebuild shop to business mapping
-    console.log('🗺️ Rebuilding shop mappings...');
-    for (const [businessId, business] of businessDatabase) {
-      if (business.shopDomain) {
-        shopToBusinessMap.set(business.shopDomain, businessId);
-        console.log(`   ✓ Mapped: ${business.shopDomain} → ${businessId}`);
-      }
+    try {
+        console.log('\n🚀 Starting server...\n');
+
+        // ✅ 1. Initialize persistence directories
+        console.log('📁 Initializing persistence...');
+        await persistence.initializePersistence();
+
+        // ✅ 2. Load all businesses from files
+        console.log('💼 Loading businesses from storage...');
+        businessDatabase = await persistence.loadAllBusinesses();
+
+        // ✅ 3. Rebuild shop to business mapping
+        console.log('🗺️ Rebuilding shop mappings...');
+        for (const [businessId, business] of businessDatabase) {
+            if (business.shopDomain) {
+                shopToBusinessMap.set(business.shopDomain, businessId);
+                console.log(`   ✓ Mapped: ${business.shopDomain} → ${businessId}`);
+            }
+        }
+
+        console.log(`\n✅ Loaded ${businessDatabase.size} business(es) from persistence`);
+        console.log(`✅ Mapped ${shopToBusinessMap.size} shop domain(s)\n`);
+
+        // ✅ 4. Start Express server
+        server = app.listen(PORT, () => {
+            console.log('\n' + '='.repeat(60));
+            console.log('🎉 SERVER STARTED SUCCESSFULLY');
+            console.log('='.repeat(60));
+            console.log(`📡 Server running on port: ${PORT}`);
+            console.log(`🌐 Base URL: ${BASE_URL}`);
+            console.log(`📊 Connected Stores: ${businessDatabase.size}`);
+            console.log(`💾 Active Sessions: ${userSessions.size}`);
+            console.log(`⏰ Started at: ${new Date().toISOString()}`);
+            console.log('='.repeat(60) + '\n');
+        });
+
+    } catch (error) {
+        console.error('\n' + '='.repeat(60));
+        console.error('❌ FATAL ERROR: Server failed to start');
+        console.error('='.repeat(60));
+        console.error('Error:', error.message);
+        console.error('Stack:', error.stack);
+        console.error('='.repeat(60) + '\n');
+        process.exit(1);
     }
-    
-    console.log(`\n✅ Loaded ${businessDatabase.size} business(es) from persistence`);
-    console.log(`✅ Mapped ${shopToBusinessMap.size} shop domain(s)\n`);
-    
-    // ✅ 4. Start Express server
-    server = app.listen(PORT, () => {
-      console.log('\n' + '='.repeat(60));
-      console.log('🎉 SERVER STARTED SUCCESSFULLY');
-      console.log('='.repeat(60));
-      console.log(`📡 Server running on port: ${PORT}`);
-      console.log(`🌐 Base URL: ${BASE_URL}`);
-      console.log(`📊 Connected Stores: ${businessDatabase.size}`);
-      console.log(`💾 Active Sessions: ${userSessions.size}`);
-      console.log(`⏰ Started at: ${new Date().toISOString()}`);
-      console.log('='.repeat(60) + '\n');
-    });
-    
-  } catch (error) {
-    console.error('\n' + '='.repeat(60));
-    console.error('❌ FATAL ERROR: Server failed to start');
-    console.error('='.repeat(60));
-    console.error('Error:', error.message);
-    console.error('Stack:', error.stack);
-    console.error('='.repeat(60) + '\n');
-    process.exit(1);
-  }
 }
 
 // =====================================================
@@ -1754,74 +1898,74 @@ async function startServer() {
 
 // Handle SIGTERM signal (from hosting platforms like Render)
 process.on('SIGTERM', async () => {
-  console.log('\n' + '='.repeat(60));
-  console.log('📴 SIGTERM signal received');
-  console.log('='.repeat(60));
-  console.log('Initiating graceful shutdown...\n');
-  
-  await gracefulShutdown('SIGTERM');
+    console.log('\n' + '='.repeat(60));
+    console.log('📴 SIGTERM signal received');
+    console.log('='.repeat(60));
+    console.log('Initiating graceful shutdown...\n');
+
+    await gracefulShutdown('SIGTERM');
 });
 
 // Handle SIGINT signal (Ctrl+C in terminal)
 process.on('SIGINT', async () => {
-  console.log('\n' + '='.repeat(60));
-  console.log('📴 SIGINT signal received (Ctrl+C)');
-  console.log('='.repeat(60));
-  console.log('Initiating graceful shutdown...\n');
-  
-  await gracefulShutdown('SIGINT');
+    console.log('\n' + '='.repeat(60));
+    console.log('📴 SIGINT signal received (Ctrl+C)');
+    console.log('='.repeat(60));
+    console.log('Initiating graceful shutdown...\n');
+
+    await gracefulShutdown('SIGINT');
 });
 
 // Graceful shutdown function
 async function gracefulShutdown(signal) {
-  console.log(`⏳ Shutting down gracefully (${signal})...`);
-  
-  try {
-    // ✅ 1. Save all active conversation sessions
-    console.log('\n💾 Saving active conversation sessions...');
-    let savedCount = 0;
-    for (const [key, memory] of userSessions) {
-      try {
-        await memory.saveToFile();
-        savedCount++;
-      } catch (err) {
-        console.error(`   ⚠️ Failed to save session ${key}:`, err.message);
-      }
+    console.log(`⏳ Shutting down gracefully (${signal})...`);
+
+    try {
+        // ✅ 1. Save all active conversation sessions
+        console.log('\n💾 Saving active conversation sessions...');
+        let savedCount = 0;
+        for (const [key, memory] of userSessions) {
+            try {
+                await memory.saveToFile();
+                savedCount++;
+            } catch (err) {
+                console.error(`   ⚠️ Failed to save session ${key}:`, err.message);
+            }
+        }
+        console.log(`   ✓ Saved ${savedCount} conversation session(s)`);
+
+        // ✅ 2. Close HTTP server
+        if (server) {
+            console.log('\n🔌 Closing HTTP server...');
+            await new Promise((resolve, reject) => {
+                server.close((err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+            console.log('   ✓ HTTP server closed successfully');
+        }
+
+        // ✅ 3. Final statistics
+        console.log('\n📊 Final Statistics:');
+        console.log(`   Connected Stores: ${businessDatabase.size}`);
+        console.log(`   Active Sessions: ${userSessions.size}`);
+        console.log(`   Total Uptime: ${Math.floor(process.uptime())}s`);
+
+        console.log('\n' + '='.repeat(60));
+        console.log('✅ Shutdown completed successfully');
+        console.log('='.repeat(60) + '\n');
+
+        process.exit(0);
+
+    } catch (error) {
+        console.error('\n' + '='.repeat(60));
+        console.error('❌ Error during shutdown:');
+        console.error('='.repeat(60));
+        console.error(error);
+        console.error('='.repeat(60) + '\n');
+        process.exit(1);
     }
-    console.log(`   ✓ Saved ${savedCount} conversation session(s)`);
-    
-    // ✅ 2. Close HTTP server
-    if (server) {
-      console.log('\n🔌 Closing HTTP server...');
-      await new Promise((resolve, reject) => {
-        server.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-      console.log('   ✓ HTTP server closed successfully');
-    }
-    
-    // ✅ 3. Final statistics
-    console.log('\n📊 Final Statistics:');
-    console.log(`   Connected Stores: ${businessDatabase.size}`);
-    console.log(`   Active Sessions: ${userSessions.size}`);
-    console.log(`   Total Uptime: ${Math.floor(process.uptime())}s`);
-    
-    console.log('\n' + '='.repeat(60));
-    console.log('✅ Shutdown completed successfully');
-    console.log('='.repeat(60) + '\n');
-    
-    process.exit(0);
-    
-  } catch (error) {
-    console.error('\n' + '='.repeat(60));
-    console.error('❌ Error during shutdown:');
-    console.error('='.repeat(60));
-    console.error(error);
-    console.error('='.repeat(60) + '\n');
-    process.exit(1);
-  }
 }
 
 // =====================================================
@@ -1830,32 +1974,32 @@ async function gracefulShutdown(signal) {
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  console.error('\n' + '='.repeat(60));
-  console.error('❌ UNCAUGHT EXCEPTION');
-  console.error('='.repeat(60));
-  console.error('Error:', error.message);
-  console.error('Stack:', error.stack);
-  console.error('='.repeat(60) + '\n');
-  
-  // Try to save state before exiting
-  gracefulShutdown('uncaughtException').finally(() => {
-    process.exit(1);
-  });
+    console.error('\n' + '='.repeat(60));
+    console.error('❌ UNCAUGHT EXCEPTION');
+    console.error('='.repeat(60));
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
+    console.error('='.repeat(60) + '\n');
+
+    // Try to save state before exiting
+    gracefulShutdown('uncaughtException').finally(() => {
+        process.exit(1);
+    });
 });
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('\n' + '='.repeat(60));
-  console.error('❌ UNHANDLED PROMISE REJECTION');
-  console.error('='.repeat(60));
-  console.error('Reason:', reason);
-  console.error('Promise:', promise);
-  console.error('='.repeat(60) + '\n');
-  
-  // Try to save state before exiting
-  gracefulShutdown('unhandledRejection').finally(() => {
-    process.exit(1);
-  });
+    console.error('\n' + '='.repeat(60));
+    console.error('❌ UNHANDLED PROMISE REJECTION');
+    console.error('='.repeat(60));
+    console.error('Reason:', reason);
+    console.error('Promise:', promise);
+    console.error('='.repeat(60) + '\n');
+
+    // Try to save state before exiting
+    gracefulShutdown('unhandledRejection').finally(() => {
+        process.exit(1);
+    });
 });
 
 // =====================================================
